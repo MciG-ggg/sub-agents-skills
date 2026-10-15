@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 from unittest.mock import patch
 
 import pytest
@@ -11,6 +12,7 @@ from _builder import (
     _BACKEND_SPECS,
     AgentInvocation,
     ProcessInvocation,
+    _opencode_is_v2,
     build_command,
     build_invocation_args,
     effort_flags,
@@ -513,6 +515,46 @@ class TestBuildInvocationArgs:
         assert permission_env is not None
         assert json.loads(permission_env) == expected
 
+    def test_opencode_v1_places_model_and_variant_after_run(self) -> None:
+        process = build_invocation_args(_inv("opencode", model="p/m", effort="high"))
+        assert process.args[:5] == ["run", "--model", "p/m", "--variant", "high"]
+
+    def test_opencode_working_directory_is_passed_through_pwd(self) -> None:
+        process = build_invocation_args(_inv("opencode", cwd="/target/dir"))
+        assert _env(process)["PWD"] == "/target/dir"
+
+    def test_opencode_v2_uses_private_server_model_variant_and_config_permission(self) -> None:
+        with patch("_builder._opencode_is_v2", return_value=True):
+            process = build_invocation_args(
+                _inv("opencode", model="p/m", effort="high", permission="read-only")
+            )
+        assert process.args[:-1] == [
+            "run",
+            "--standalone",
+            "--model",
+            "p/m#high",
+            "--format",
+            "json",
+            "--auto",
+        ]
+        env = _env(process)
+        assert "OPENCODE_PERMISSION" not in env
+        config = env["OPENCODE_CONFIG_CONTENT"]
+        assert config is not None
+        assert json.loads(config) == {
+            "permission": {
+                "edit": "deny",
+                "task": "deny",
+                "external_directory": "deny",
+                "question": "deny",
+            }
+        }
+
+    def test_opencode_v2_effort_without_model_is_rejected(self) -> None:
+        with patch("_builder._opencode_is_v2", return_value=True):
+            with pytest.raises(ValueError, match="effort requires model"):
+                build_invocation_args(_inv("opencode", effort="high"))
+
     def test_command_code_read_only_uses_plan_mode(self) -> None:
         process = build_invocation_args(_inv("command-code", permission="read-only"))
         assert process.command == "command-code"
@@ -548,6 +590,23 @@ class TestBuildInvocationArgs:
     def test_unknown_cli_raises(self) -> None:
         with pytest.raises(ValueError, match="Unsupported CLI"):
             build_invocation_args(_inv("totally-fake-cli"))
+
+
+class TestOpencodeVersionProbe:
+    def test_v2_version_output_selects_v2(self) -> None:
+        completed = subprocess.CompletedProcess([], 0, "opencode v2.0.29\n", "")
+        with patch("subprocess.run", return_value=completed):
+            assert _opencode_is_v2() is True
+
+    @pytest.mark.parametrize("stdout", ["1.18.20\n", "unexpected\n"])
+    def test_v1_or_unreadable_version_output_counts_as_v1(self, stdout: str) -> None:
+        completed = subprocess.CompletedProcess([], 0, stdout, "")
+        with patch("subprocess.run", return_value=completed):
+            assert _opencode_is_v2() is False
+
+    def test_missing_binary_counts_as_v1(self) -> None:
+        with patch("subprocess.run", side_effect=FileNotFoundError()):
+            assert _opencode_is_v2() is False
 
 
 class TestPermissionFlags:

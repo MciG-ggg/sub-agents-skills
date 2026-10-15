@@ -579,6 +579,24 @@ class TestExecuteAgent:
         assert result["status"] == "success"
         assert result["result"] == "DONE"
 
+    def test_opencode_output_without_final_step_finish_is_parsed(self) -> None:
+        mock_process = MagicMock()
+        mock_process.stdout.readline.side_effect = [
+            '{"type":"step_finish","part":{"reason":"tool-calls"}}\n',
+            '{"type":"text","part":{"text":"DONE"}}\n',
+            "",
+        ]
+        mock_process.communicate.return_value = ("", "")
+        mock_process.returncode = 0
+
+        with patch("subprocess.Popen", return_value=mock_process):
+            result = execute_agent(
+                AgentInvocation(cli="opencode", prompt="x", cwd="/tmp"),
+                timeout_ms=5000,
+            )
+        assert result["status"] == "success"
+        assert result["result"] == "DONE"
+
     def test_command_code_ndjson_output_is_parsed(self) -> None:
         mock_process = MagicMock()
         mock_process.stdout.readline.side_effect = [
@@ -647,6 +665,12 @@ class TestOpencodeDataDirIsolation:
         temp_dir = os.path.dirname(data_home)
         assert temp_dir == os.path.dirname(state_home)
         assert os.path.basename(temp_dir).startswith("subagent-opencode-")
+
+    def test_opencode_v2_uses_the_default_xdg_dirs(self) -> None:
+        with patch.dict("os.environ", {"XDG_DATA_HOME": "/user/data"}):
+            with patch("_builder._opencode_is_v2", return_value=True):
+                _, env = self._run_capturing_env(self._mock_process)
+        assert env["XDG_DATA_HOME"] == "/user/data"
 
     def test_temp_dir_is_removed_after_the_run(self) -> None:
         _, env = self._run_capturing_env(self._mock_process)

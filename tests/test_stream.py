@@ -136,6 +136,13 @@ class TestStreamProcessor:
         assert result["status"] == "success"
         assert result["stop_reason"] == "stop"
 
+    def test_opencode_stream_without_final_step_finish_returns_collected_text(self) -> None:
+        processor = StreamProcessor("opencode")
+        assert not processor.process_line('{"type":"step_finish","part":{"reason":"tool-calls"}}')
+        assert not processor.process_line('{"type":"text","part":{"text":"DONE"}}')
+        processor.finish_opencode_stream()
+        assert processor.get_result() == {"type": "result", "result": "DONE", "status": "success"}
+
     def test_opencode_non_stop_finish_is_partial(self) -> None:
         processor = StreamProcessor("opencode")
         assert not processor.process_line('{"type":"text","part":{"text":"truncated"}}')
