@@ -79,53 +79,15 @@ class TestLoadAgentRejectsInvalidNames:
             assert "Valid" in agent.system_context
             assert agent.file_path.endswith("valid-agent.md")
 
-    def test_rejects_parent_directory_traversal(self) -> None:
+    @pytest.mark.parametrize(
+        "name",
+        ["../etc/passwd", "/etc/passwd", "sub/agent", "sub\\agent", "", "agent;rm -rf", ".hidden"],
+    )
+    def test_rejects_names_outside_the_agents_directory(self, name: str) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             agents_dir = self._make_agents_dir(tmpdir)
             with pytest.raises(ValueError, match="Invalid agent name"):
-                load_agent(agents_dir, "../etc/passwd")
-
-    def test_rejects_nested_traversal(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            agents_dir = self._make_agents_dir(tmpdir)
-            with pytest.raises(ValueError, match="Invalid agent name"):
-                load_agent(agents_dir, "../../secret")
-
-    def test_rejects_absolute_path(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            agents_dir = self._make_agents_dir(tmpdir)
-            with pytest.raises(ValueError, match="Invalid agent name"):
-                load_agent(agents_dir, "/etc/passwd")
-
-    def test_rejects_forward_slash(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            agents_dir = self._make_agents_dir(tmpdir)
-            with pytest.raises(ValueError, match="Invalid agent name"):
-                load_agent(agents_dir, "sub/agent")
-
-    def test_rejects_backslash(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            agents_dir = self._make_agents_dir(tmpdir)
-            with pytest.raises(ValueError, match="Invalid agent name"):
-                load_agent(agents_dir, "sub\\agent")
-
-    def test_rejects_empty_string(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            agents_dir = self._make_agents_dir(tmpdir)
-            with pytest.raises(ValueError, match="Invalid agent name"):
-                load_agent(agents_dir, "")
-
-    def test_rejects_shell_metacharacters(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            agents_dir = self._make_agents_dir(tmpdir)
-            with pytest.raises(ValueError, match="Invalid agent name"):
-                load_agent(agents_dir, "agent;rm -rf")
-
-    def test_rejects_leading_dot(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            agents_dir = self._make_agents_dir(tmpdir)
-            with pytest.raises(ValueError, match="Invalid agent name"):
-                load_agent(agents_dir, ".hidden")
+                load_agent(agents_dir, name)
 
 
 class TestLoadAgent:
@@ -148,7 +110,6 @@ Do something.
             assert "# Test Agent" in agent.system_context
             assert "This is a test agent." in agent.description
             assert agent.file_path.endswith("test-agent.md")
-            assert agent.permission == DEFAULT_PERMISSION
             assert agent.model is None
             assert agent.effort is None
 
@@ -207,13 +168,10 @@ class TestValidatePermission:
         for value in PERMISSION_VALUES:
             assert validate_permission(value) == value
 
-    def test_rejects_invalid_value(self) -> None:
+    @pytest.mark.parametrize("value", ["dangerous", "readonly"])
+    def test_rejects_unknown_value(self, value: str) -> None:
         with pytest.raises(ValueError, match="Invalid permission"):
-            validate_permission("dangerous")
-
-    def test_rejects_typo(self) -> None:
-        with pytest.raises(ValueError, match="Invalid permission"):
-            validate_permission("readonly")
+            validate_permission(value)
 
 
 class TestLoadAgentPermission:
@@ -223,21 +181,14 @@ class TestLoadAgentPermission:
             agent = load_agent(tmpdir, "a")
             assert agent.permission == DEFAULT_PERMISSION
 
-    def test_explicit_read_only(self) -> None:
+    @pytest.mark.parametrize("permission", ["read-only", "yolo"])
+    def test_explicit_permission_is_loaded(self, permission: str) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             (Path(tmpdir) / "a.md").write_text(
-                "---\nrun-agent: codex\npermission: read-only\n---\n# A\n"
+                f"---\nrun-agent: codex\npermission: {permission}\n---\n# A\n"
             )
             agent = load_agent(tmpdir, "a")
-            assert agent.permission == "read-only"
-
-    def test_explicit_yolo(self) -> None:
-        with tempfile.TemporaryDirectory() as tmpdir:
-            (Path(tmpdir) / "a.md").write_text(
-                "---\nrun-agent: claude\npermission: yolo\n---\n# A\n"
-            )
-            agent = load_agent(tmpdir, "a")
-            assert agent.permission == "yolo"
+            assert agent.permission == permission
 
     def test_invalid_permission_raises(self) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
