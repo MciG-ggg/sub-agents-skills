@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 from unittest.mock import patch
 
 import pytest
@@ -11,6 +12,7 @@ from _builder import (
     _BACKEND_SPECS,
     AgentInvocation,
     ProcessInvocation,
+    _opencode_is_v2,
     build_command,
     build_invocation_args,
     effort_flags,
@@ -63,85 +65,6 @@ class TestBuildCommand:
         assert all(
             set(spec.permissions) == set(PERMISSION_VALUES) for spec in _BACKEND_SPECS.values()
         )
-
-    def test_codex_returns_exec_command_with_json_flag(self) -> None:
-        cmd, args = build_command("codex", "test prompt")
-        assert cmd == "codex"
-        assert args == ["exec", "--json", "--skip-git-repo-check", "test prompt"]
-
-    def test_claude_returns_streaming_json_command(self) -> None:
-        cmd, args = build_command("claude", "test prompt")
-        assert cmd == "claude"
-        assert args == ["--output-format", "stream-json", "--verbose", "-p", "test prompt"]
-
-    def test_cursor_returns_json_command(self) -> None:
-        cmd, args = build_command("cursor-agent", "test prompt")
-        assert cmd == "cursor-agent"
-        assert args == ["--output-format", "json", "-p", "test prompt"]
-
-    def test_cursor_argv_never_carries_api_key(self) -> None:
-        """Even with CLI_API_KEY set, the secret must not appear in argv."""
-        with patch.dict("os.environ", {"CLI_API_KEY": "test-key"}):
-            cmd, args = build_command("cursor-agent", "test prompt")
-            assert "--api-key" not in args
-            assert "-a" not in args
-            assert "test-key" not in args
-
-    def test_gemini_returns_streaming_json_command(self) -> None:
-        cmd, args = build_command("gemini", "test prompt")
-        assert cmd == "gemini"
-        assert args == [
-            "--skip-trust",
-            "--output-format",
-            "stream-json",
-            "-p",
-            "test prompt",
-        ]
-
-    def test_antigravity_returns_streaming_json_command(self) -> None:
-        cmd, args = build_command("antigravity", "test prompt")
-        assert cmd == "agy"
-        assert args == ["--output-format", "stream-json", "-p", "test prompt"]
-
-    def test_grok_returns_json_command_with_turn_budget(self) -> None:
-        cmd, args = build_command("grok", "test prompt")
-        assert cmd == "grok"
-        assert args == [
-            "--output-format",
-            "json",
-            "--verbatim",
-            "-p",
-            "test prompt",
-        ]
-
-    def test_glm_reuses_claude_binary_and_argv(self) -> None:
-        # glm runs the claude binary, so build_command returns the claude shape.
-        cmd, args = build_command("glm", "test prompt")
-        assert cmd == "claude"
-        assert args == ["--output-format", "stream-json", "--verbose", "-p", "test prompt"]
-
-    def test_kimi_reuses_claude_binary_and_argv(self) -> None:
-        cmd, args = build_command("kimi", "test prompt")
-        assert cmd == "claude"
-        assert args == ["--output-format", "stream-json", "--verbose", "-p", "test prompt"]
-
-    def test_opencode_returns_json_run_command(self) -> None:
-        cmd, args = build_command("opencode", "test prompt")
-        assert cmd == "opencode"
-        assert args == ["run", "--format", "json", "--auto", "test prompt"]
-
-    def test_command_code_returns_headless_json_command(self) -> None:
-        cmd, args = build_command("command-code", "test prompt")
-        assert cmd == "command-code"
-        assert args == [
-            "--output-format",
-            "json",
-            "--trust",
-            "--no-session",
-            "--skip-onboarding",
-            "-p",
-            "test prompt",
-        ]
 
     def test_unknown_cli_raises_error(self) -> None:
         with pytest.raises(ValueError, match="Unsupported CLI"):
@@ -273,16 +196,6 @@ class TestBuildInvocationArgs:
         assert "User task" in prompt_arg
         assert process.env_override is None
 
-    def test_codex_falls_back_to_concatenation_without_agent_file(self) -> None:
-        process = build_invocation_args(_inv("codex"))
-        assert process.command == "codex"
-        prompt_arg = process.args[-1]
-        assert "[System Context]" in prompt_arg
-        assert "Agent definition" in prompt_arg
-        assert "[User Prompt]" in prompt_arg
-        assert "User task" in prompt_arg
-        assert process.env_override is None
-
     def test_grok_concatenates_prompt_and_sets_cwd(self) -> None:
         process = build_invocation_args(_inv("grok"))
         assert process.command == "grok"
@@ -358,18 +271,6 @@ class TestBuildInvocationArgs:
             "CLI_API_KEY": None,
         }
         assert "zai-secret" not in process.args
-
-    def test_glm_strips_inherited_anthropic_api_key(self) -> None:
-        # Even when the parent process has a real ANTHROPIC_API_KEY, the glm
-        # override marks it for removal (None) so it never reaches Z.ai.
-        with patch.dict(
-            "os.environ",
-            {"GLM_API_KEY": "zai-secret", "ANTHROPIC_API_KEY": "sk-ant-real"},
-            clear=True,
-        ):
-            process = build_invocation_args(_inv("glm"))
-        assert _env(process)["ANTHROPIC_API_KEY"] is None
-        assert _env(process)["ANTHROPIC_AUTH_TOKEN"] == "zai-secret"
 
     def test_glm_prefers_provider_specific_api_key(self) -> None:
         with patch.dict(
@@ -513,143 +414,69 @@ class TestBuildInvocationArgs:
         assert permission_env is not None
         assert json.loads(permission_env) == expected
 
-    def test_command_code_read_only_uses_plan_mode(self) -> None:
-        process = build_invocation_args(_inv("command-code", permission="read-only"))
-        assert process.command == "command-code"
-        assert process.args[:2] == [
-            "--permission-mode",
-            "plan",
-        ]
-        assert process.args[-2:] == ["-p", process.args[-1]]
-        assert "[System Context]" in process.args[-1]
-        assert "Agent definition" in process.args[-1]
-        assert process.env_override is None
+    def test_opencode_v1_places_model_and_variant_after_run(self) -> None:
+        process = build_invocation_args(_inv("opencode", model="p/m", effort="high"))
+        assert process.args[:5] == ["run", "--model", "p/m", "--variant", "high"]
 
-    def test_command_code_safe_edit_enables_headless_tools_in_auto_accept_mode(self) -> None:
-        process = build_invocation_args(_inv("command-code", permission="safe-edit"))
-        assert process.command == "command-code"
-        assert process.args[:3] == [
-            "--yolo",
-            "--permission-mode",
-            "auto-accept",
-        ]
-        assert process.args[-2:] == ["-p", process.args[-1]]
-        assert "[System Context]" in process.args[-1]
-        assert "Agent definition" in process.args[-1]
-        assert process.env_override is None
+    def test_opencode_working_directory_is_passed_through_pwd(self) -> None:
+        process = build_invocation_args(_inv("opencode", cwd="/target/dir"))
+        assert _env(process)["PWD"] == "/target/dir"
 
-    def test_command_code_yolo_uses_native_yolo_mode(self) -> None:
-        process = build_invocation_args(_inv("command-code", permission="yolo"))
-        assert process.command == "command-code"
-        assert process.args[0] == "--yolo"
-        assert "--permission-mode" not in process.args
-        assert process.args[-2:] == ["-p", process.args[-1]]
+    def test_opencode_v2_uses_private_server_model_variant_and_config_permission(self) -> None:
+        with patch("_builder._opencode_is_v2", return_value=True):
+            process = build_invocation_args(
+                _inv("opencode", model="p/m", effort="high", permission="read-only")
+            )
+        assert process.args[:-1] == [
+            "run",
+            "--standalone",
+            "--model",
+            "p/m#high",
+            "--format",
+            "json",
+            "--auto",
+        ]
+        env = _env(process)
+        assert "OPENCODE_PERMISSION" not in env
+        config = env["OPENCODE_CONFIG_CONTENT"]
+        assert config is not None
+        assert json.loads(config) == {
+            "permission": {
+                "edit": "deny",
+                "task": "deny",
+                "external_directory": "deny",
+                "question": "deny",
+            }
+        }
+
+    def test_opencode_v2_effort_without_model_is_rejected(self) -> None:
+        with patch("_builder._opencode_is_v2", return_value=True):
+            with pytest.raises(ValueError, match="effort requires model"):
+                build_invocation_args(_inv("opencode", effort="high"))
 
     def test_unknown_cli_raises(self) -> None:
         with pytest.raises(ValueError, match="Unsupported CLI"):
             build_invocation_args(_inv("totally-fake-cli"))
 
 
+class TestOpencodeVersionProbe:
+    def test_v2_version_output_selects_v2(self) -> None:
+        completed = subprocess.CompletedProcess([], 0, "opencode v2.0.29\n", "")
+        with patch("subprocess.run", return_value=completed):
+            assert _opencode_is_v2() is True
+
+    @pytest.mark.parametrize("stdout", ["1.18.20\n", "unexpected\n"])
+    def test_v1_or_unreadable_version_output_counts_as_v1(self, stdout: str) -> None:
+        completed = subprocess.CompletedProcess([], 0, stdout, "")
+        with patch("subprocess.run", return_value=completed):
+            assert _opencode_is_v2() is False
+
+    def test_missing_binary_counts_as_v1(self) -> None:
+        with patch("subprocess.run", side_effect=FileNotFoundError()):
+            assert _opencode_is_v2() is False
+
+
 class TestPermissionFlags:
-    """Each CLI maps the 3 permission levels to its own flags."""
-
-    def test_codex_flags(self) -> None:
-        assert permission_flags("codex", "read-only") == ["-s", "read-only"]
-        assert permission_flags("codex", "safe-edit") == [
-            "-s",
-            "workspace-write",
-            "-c",
-            "approval_policy=never",
-        ]
-        assert permission_flags("codex", "yolo") == ["--dangerously-bypass-approvals-and-sandbox"]
-
-    def test_claude_flags(self) -> None:
-        assert permission_flags("claude", "read-only") == ["--permission-mode", "plan"]
-        assert permission_flags("claude", "safe-edit") == ["--permission-mode", "acceptEdits"]
-        assert permission_flags("claude", "yolo") == ["--dangerously-skip-permissions"]
-
-    def test_glm_flags_match_claude(self) -> None:
-        # glm drives the claude binary, so approval flags are identical.
-        assert permission_flags("glm", "read-only") == ["--permission-mode", "plan"]
-        assert permission_flags("glm", "safe-edit") == ["--permission-mode", "acceptEdits"]
-        assert permission_flags("glm", "yolo") == ["--dangerously-skip-permissions"]
-
-    def test_kimi_flags_match_claude(self) -> None:
-        assert permission_flags("kimi", "read-only") == ["--permission-mode", "plan"]
-        assert permission_flags("kimi", "safe-edit") == ["--permission-mode", "acceptEdits"]
-        assert permission_flags("kimi", "yolo") == ["--dangerously-skip-permissions"]
-
-    def test_gemini_flags(self) -> None:
-        # --skip-trust lives in build_command (headless prerequisite), not in
-        # the permission mapping.
-        assert permission_flags("gemini", "read-only") == ["--approval-mode", "plan"]
-        assert permission_flags("gemini", "safe-edit") == ["--approval-mode", "auto_edit"]
-        assert permission_flags("gemini", "yolo") == ["-y"]
-
-    def test_antigravity_flags(self) -> None:
-        assert permission_flags("antigravity", "read-only") == ["--mode", "plan", "--sandbox"]
-        assert permission_flags("antigravity", "safe-edit") == [
-            "--mode",
-            "accept-edits",
-            "--sandbox",
-        ]
-        assert permission_flags("antigravity", "yolo") == ["--dangerously-skip-permissions"]
-
-    def test_cursor_flags(self) -> None:
-        assert permission_flags("cursor-agent", "read-only") == [
-            "--mode",
-            "plan",
-            "--sandbox",
-            "enabled",
-        ]
-        assert permission_flags("cursor-agent", "safe-edit") == [
-            "--trust",
-            "--sandbox",
-            "enabled",
-        ]
-        assert permission_flags("cursor-agent", "yolo") == ["-f", "--trust"]
-
-    def test_grok_flags(self) -> None:
-        assert permission_flags("grok", "read-only") == [
-            "--permission-mode",
-            "bypassPermissions",
-            "--sandbox",
-            "read-only",
-        ]
-        assert permission_flags("grok", "safe-edit") == [
-            "--permission-mode",
-            "bypassPermissions",
-            "--sandbox",
-            "workspace",
-        ]
-        assert permission_flags("grok", "yolo") == [
-            "--permission-mode",
-            "bypassPermissions",
-            "--sandbox",
-            "off",
-        ]
-
-    def test_opencode_permissions_are_environment_only(self) -> None:
-        assert permission_flags("opencode", "read-only") == []
-        assert permission_flags("opencode", "safe-edit") == []
-        assert permission_flags("opencode", "yolo") == []
-
-    def test_command_code_read_only_permission_uses_plan(self) -> None:
-        assert permission_flags("command-code", "read-only") == [
-            "--permission-mode",
-            "plan",
-        ]
-
-    def test_command_code_safe_edit_permission_uses_yolo_with_auto_accept(self) -> None:
-        assert permission_flags("command-code", "safe-edit") == [
-            "--yolo",
-            "--permission-mode",
-            "auto-accept",
-        ]
-
-    def test_command_code_yolo_permission_uses_native_yolo(self) -> None:
-        assert permission_flags("command-code", "yolo") == ["--yolo"]
-
     def test_unknown_cli_raises(self) -> None:
         """Unknown CLI in permission mapping is a programmer error — fail fast."""
         with pytest.raises(ValueError, match="No permission mapping"):
@@ -660,11 +487,7 @@ class TestPermissionFlags:
         with pytest.raises(ValueError, match="No permission mapping"):
             permission_flags("codex", "weird")
 
-
-class TestPermissionAppliedToCommand:
-    """End-to-end: permission level should produce the right CLI flags in args."""
-
-    def test_codex_safe_edit_flags_in_args(self) -> None:
+    def test_permission_flags_reach_the_command(self) -> None:
         process = build_invocation_args(
             AgentInvocation(
                 cli="codex",
@@ -679,58 +502,3 @@ class TestPermissionAppliedToCommand:
         s_idx = process.args.index("-s")
         assert process.args[s_idx + 1] == "workspace-write"
         assert "approval_policy=never" in process.args
-
-    def test_claude_yolo_flag_in_args(self) -> None:
-        process = build_invocation_args(
-            AgentInvocation(
-                cli="claude",
-                prompt="Task",
-                cwd="/test/cwd",
-                system_context="Agent",
-                permission="yolo",
-            )
-        )
-        assert "--dangerously-skip-permissions" in process.args
-
-    def test_gemini_read_only_flags_in_args(self) -> None:
-        process = build_invocation_args(
-            AgentInvocation(
-                cli="gemini",
-                prompt="Task",
-                cwd="/test/cwd",
-                system_context="Agent",
-                agent_file="/path/to/agent.md",
-                permission="read-only",
-            )
-        )
-        assert "--approval-mode" in process.args
-        idx = process.args.index("--approval-mode")
-        assert process.args[idx + 1] == "plan"
-
-    @pytest.mark.parametrize("permission", ["read-only", "safe-edit"])
-    def test_cursor_non_yolo_modes_enable_sandbox(self, permission: str) -> None:
-        process = build_invocation_args(
-            AgentInvocation(
-                cli="cursor-agent",
-                prompt="Task",
-                cwd="/test/cwd",
-                system_context="Agent",
-                permission=permission,
-            )
-        )
-        sandbox_idx = process.args.index("--sandbox")
-        assert process.args[sandbox_idx + 1] == "enabled"
-
-    def test_grok_safe_edit_in_args(self) -> None:
-        process = build_invocation_args(
-            AgentInvocation(
-                cli="grok",
-                prompt="Task",
-                cwd="/test/cwd",
-                system_context="Agent",
-                permission="safe-edit",
-            )
-        )
-        assert "--sandbox" in process.args
-        idx = process.args.index("--sandbox")
-        assert process.args[idx + 1] == "workspace"

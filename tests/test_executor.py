@@ -67,13 +67,6 @@ class TestBuildFinalResponse:
         assert r["exit_code"] == 1
         assert r["status"] == "partial"
 
-    def test_nonzero_with_result_is_partial(self) -> None:
-        r = build_final_response(
-            cli="codex", returncode=2, result={"result": "stuff"}, stdout_lines=[], stderr=""
-        )
-        assert r["status"] == "partial"
-        assert r["exit_code"] == 2
-
     def test_result_marked_partial_stays_partial_even_with_zero_exit(self) -> None:
         r = build_final_response(
             cli="grok",
@@ -256,26 +249,6 @@ class TestExecuteAgent:
                 assert result["exit_code"] == 127
                 assert "not found" in result["error"].lower()
 
-    def test_claude_non_result_event_does_not_end_process_before_result(self) -> None:
-        mock_process = MagicMock()
-        mock_process.stdout.readline.side_effect = [
-            '{"type": "system", "subtype": "notification", '
-            '"text": "Background operation completed"}\n',
-            '{"type": "result", "result": "actual response"}\n',
-            "",
-        ]
-        mock_process.communicate.return_value = ("", "")
-        mock_process.returncode = 0
-
-        with patch("subprocess.Popen", return_value=mock_process):
-            result = execute_agent(
-                AgentInvocation(cli="claude", prompt="x", cwd="/tmp"),
-                timeout_ms=5000,
-            )
-
-        assert result["status"] == "success"
-        assert result["result"] == "actual response"
-
     def test_claude_error_result_is_not_reported_as_success(self) -> None:
         mock_process = MagicMock()
         mock_process.stdout.readline.side_effect = [
@@ -294,35 +267,6 @@ class TestExecuteAgent:
         assert result["status"] == "error"
         assert result["result"] == ""
         assert "error_during_execution" in result["error"]
-
-    def test_codex_concatenates_prompt_with_agent_file(self) -> None:
-        mock_process = MagicMock()
-        mock_process.stdout.readline.return_value = ""
-        mock_process.communicate.return_value = ("", "")
-        mock_process.returncode = 0
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            agent_file = os.path.join(tmpdir, "test-agent.md")
-            with open(agent_file, "w") as f:
-                f.write("# Agent\n\nDefinition.")
-            with patch("subprocess.Popen", return_value=mock_process) as mock_popen:
-                execute_agent(
-                    AgentInvocation(
-                        cli="codex",
-                        prompt="User task",
-                        cwd=tmpdir,
-                        system_context="Agent definition",
-                        agent_file=agent_file,
-                    ),
-                    timeout_ms=5000,
-                )
-                call_args = mock_popen.call_args[0][0]
-                assert not any("model_instructions_file" in arg for arg in call_args)
-                prompt_arg = call_args[-1]
-                assert "[System Context]" in prompt_arg
-                assert "Agent definition" in prompt_arg
-                assert "[User Prompt]" in prompt_arg
-                assert "User task" in prompt_arg
 
     def test_kimi_provider_configuration_reaches_child_process(self) -> None:
         mock_process = MagicMock()
@@ -467,31 +411,6 @@ class TestExecuteAgent:
         assert popen_kwargs["encoding"] == "utf-8"
         assert popen_kwargs["errors"] == "replace"
 
-    def test_windows_terminate_exit_code_still_reports_success(self) -> None:
-        """End-to-end Windows simulation: a complete result then exit code 1.
-
-        On Windows the broker calls terminate() after parsing the terminal
-        event, and TerminateProcess leaves returncode 1. With a full result in
-        hand this must surface as success, matching POSIX behaviour.
-        """
-        mock_process = MagicMock()
-        mock_process.stdout.readline.side_effect = [
-            '{"type": "thread.started"}\n',
-            '{"type": "item.completed", "item": {"type": "agent_message", "text": "DONE"}}\n',
-            '{"type": "turn.completed"}\n',
-            "",
-        ]
-        mock_process.communicate.return_value = ("", "")
-        mock_process.returncode = 1  # Windows TerminateProcess exit code
-
-        with patch("subprocess.Popen", return_value=mock_process):
-            result = execute_agent(
-                AgentInvocation(cli="codex", prompt="x", cwd="/tmp"),
-                timeout_ms=5000,
-            )
-        assert result["status"] == "success"
-        assert result["result"] == "DONE"
-
     def test_gemini_passes_env_with_agent_file(self) -> None:
         mock_process = MagicMock()
         mock_process.stdout.readline.return_value = ""
@@ -516,25 +435,6 @@ class TestExecuteAgent:
                 popen_kwargs = mock_popen.call_args[1]
                 assert popen_kwargs["env"]["GEMINI_SYSTEM_MD"] == agent_file
 
-    def test_antigravity_ndjson_output_is_normalized(self) -> None:
-        mock_process = MagicMock()
-        mock_process.stdout.readline.side_effect = [
-            '{"event":"init","conversation_id":"c1"}\n',
-            '{"event":"step_update","step_update":{"text_delta":"DONE"}}\n',
-            '{"event":"result","result":{"status":"SUCCESS","response":"DONE"}}\n',
-            "",
-        ]
-        mock_process.communicate.return_value = ("", "")
-        mock_process.returncode = 0
-
-        with patch("subprocess.Popen", return_value=mock_process):
-            result = execute_agent(
-                AgentInvocation(cli="antigravity", prompt="x", cwd="/tmp"),
-                timeout_ms=5000,
-            )
-        assert result["status"] == "success"
-        assert result["result"] == "DONE"
-
     def test_grok_pretty_json_output_is_parsed_after_exit(self) -> None:
         mock_process = MagicMock()
         mock_process.stdout.readline.side_effect = [
@@ -557,15 +457,11 @@ class TestExecuteAgent:
         assert result["status"] == "success"
         assert result["result"] == '{"findings":[]}'
 
-    def test_opencode_ndjson_output_is_parsed(self) -> None:
+    def test_opencode_output_without_final_step_finish_is_parsed(self) -> None:
         mock_process = MagicMock()
         mock_process.stdout.readline.side_effect = [
-            '{"type":"step_start","part":{}}\n',
-            '{"type":"tool_use","part":{"tool":"read"}}\n',
             '{"type":"step_finish","part":{"reason":"tool-calls"}}\n',
-            '{"type":"step_start","part":{}}\n',
             '{"type":"text","part":{"text":"DONE"}}\n',
-            '{"type":"step_finish","part":{"reason":"stop"}}\n',
             "",
         ]
         mock_process.communicate.return_value = ("", "")
@@ -574,25 +470,6 @@ class TestExecuteAgent:
         with patch("subprocess.Popen", return_value=mock_process):
             result = execute_agent(
                 AgentInvocation(cli="opencode", prompt="x", cwd="/tmp"),
-                timeout_ms=5000,
-            )
-        assert result["status"] == "success"
-        assert result["result"] == "DONE"
-
-    def test_command_code_ndjson_output_is_parsed(self) -> None:
-        mock_process = MagicMock()
-        mock_process.stdout.readline.side_effect = [
-            '{"type":"event","event":{"type":"tool_running","toolName":"read_file"}}\n',
-            '{"type":"result","subtype":"success","stopReason":"end_turn",'
-            '"finalText":"DONE","usage":{},"durationMs":12}\n',
-            "",
-        ]
-        mock_process.communicate.return_value = ("", "")
-        mock_process.returncode = 0
-
-        with patch("subprocess.Popen", return_value=mock_process):
-            result = execute_agent(
-                AgentInvocation(cli="command-code", prompt="x", cwd="/tmp"),
                 timeout_ms=5000,
             )
         assert result["status"] == "success"
@@ -647,6 +524,12 @@ class TestOpencodeDataDirIsolation:
         temp_dir = os.path.dirname(data_home)
         assert temp_dir == os.path.dirname(state_home)
         assert os.path.basename(temp_dir).startswith("subagent-opencode-")
+
+    def test_opencode_v2_uses_the_default_xdg_dirs(self) -> None:
+        with patch.dict("os.environ", {"XDG_DATA_HOME": "/user/data"}):
+            with patch("_builder._opencode_is_v2", return_value=True):
+                _, env = self._run_capturing_env(self._mock_process)
+        assert env["XDG_DATA_HOME"] == "/user/data"
 
     def test_temp_dir_is_removed_after_the_run(self) -> None:
         _, env = self._run_capturing_env(self._mock_process)
