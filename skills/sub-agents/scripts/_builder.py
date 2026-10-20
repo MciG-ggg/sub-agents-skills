@@ -38,7 +38,7 @@ class BackendSpec:
     """Backend capabilities that participate in command construction."""
 
     builder: Callable[[AgentInvocation], ProcessInvocation]
-    permissions: Mapping[str, tuple[str, ...]]
+    permissions: Mapping[str, tuple[str, ...] | None]
     effort_option: str | None
 
 
@@ -79,6 +79,12 @@ def build_command(cli: str, prompt: str) -> tuple[str, list[str]]:
             "-p",
             prompt,
         ]
+
+    if cli == "mcode":
+        return "mcode", ["exec", prompt]
+
+    if cli == "pi":
+        return "pi", ["--no-session", "--print", prompt]
 
     if cli == "cursor-agent":
         # Cursor credentials stay out of argv.
@@ -138,12 +144,28 @@ _COMMAND_CODE_PERMISSIONS = {
     "yolo": ("--yolo",),
 }
 
+_MCODE_PERMISSIONS = {
+    "read-only": None,
+    "safe-edit": ("--permission", "smart"),
+    "yolo": ("--permission", "full"),
+}
+
+_PI_PERMISSIONS = {
+    "read-only": ("--tools", "read,grep,find,ls", "--exclude-tools", "mcp__*"),
+    "safe-edit": (),
+    "yolo": (),
+}
+
 
 def permission_flags(cli: str, permission: str) -> list[str]:
     try:
-        return list(_BACKEND_SPECS[cli].permissions[permission])
+        flags = _BACKEND_SPECS[cli].permissions[permission]
     except KeyError as e:
         raise ValueError(f"No permission mapping for cli={cli!r}, permission={permission!r}") from e
+    if flags is None:
+        raise ValueError(f"CLI {cli!r} does not support permission {permission!r}.")
+    else:
+        return list(flags)
 
 
 def effort_flags(cli: str, effort: str | None) -> list[str]:
@@ -207,6 +229,26 @@ def _build_gemini_args(inv: AgentInvocation) -> ProcessInvocation:
 def _build_concatenated_args(inv: AgentInvocation) -> ProcessInvocation:
     perm = _invocation_flags(inv)
     return _concatenated_args(inv, perm, env=None)
+
+
+def _build_mcode_args(inv: AgentInvocation) -> ProcessInvocation:
+    flags = _invocation_flags(inv)
+    system_prompt = f"cwd: {inv.cwd}\n\n{inv.system_context}"
+    command, (run, *base_args) = build_command(inv.cli, inv.prompt)
+    return ProcessInvocation(
+        command,
+        [run, *flags, "--append-system-prompt", system_prompt, *base_args],
+    )
+
+
+def _build_pi_args(inv: AgentInvocation) -> ProcessInvocation:
+    flags = _invocation_flags(inv)
+    system_prompt = f"cwd: {inv.cwd}\n\n{inv.system_context}"
+    command, base_args = build_command(inv.cli, inv.prompt)
+    return ProcessInvocation(
+        command,
+        flags + ["--append-system-prompt", system_prompt] + base_args,
+    )
 
 
 def _build_grok_args(inv: AgentInvocation) -> ProcessInvocation:
@@ -389,6 +431,8 @@ _BACKEND_SPECS = {
     "gemini": BackendSpec(_build_gemini_args, _GEMINI_PERMISSIONS, None),
     "opencode": BackendSpec(_build_opencode_args, _OPENCODE_PERMISSIONS, "--variant"),
     "command-code": BackendSpec(_build_concatenated_args, _COMMAND_CODE_PERMISSIONS, "--effort"),
+    "mcode": BackendSpec(_build_mcode_args, _MCODE_PERMISSIONS, "--effort"),
+    "pi": BackendSpec(_build_pi_args, _PI_PERMISSIONS, "--thinking"),
 }
 
 

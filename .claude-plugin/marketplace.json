@@ -25,7 +25,10 @@
         "kimi",
         "grok",
         "opencode",
-        "command-code"
+        "command-code",
+        "minimax-code",
+        "mcode",
+        "pi"
       ]
     }
   ]

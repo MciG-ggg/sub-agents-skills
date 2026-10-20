@@ -23,7 +23,10 @@
     "antigravity",
     "gemini",
     "opencode",
-    "command-code"
+    "command-code",
+    "minimax-code",
+    "mcode",
+    "pi"
   ],
   "skills": "./skills/",
   "interface": {

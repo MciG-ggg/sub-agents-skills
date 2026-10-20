@@ -230,6 +230,9 @@ class StreamProcessor:
         self.result_json = data
         return True
 
+    def _process_plain_text_line(self, data: StreamData) -> bool:
+        return False
+
     def process_line(self, line: str) -> bool:
         """Process one line. Returns True when a terminal event is reached."""
         line = line.strip()
@@ -287,4 +290,6 @@ _LINE_PROCESSORS: dict[str, Callable[[StreamProcessor, StreamData], bool]] = {
     "gemini": StreamProcessor._process_gemini_line,
     "opencode": StreamProcessor._process_opencode_line,
     "command-code": StreamProcessor._process_command_code_line,
+    "mcode": StreamProcessor._process_plain_text_line,
+    "pi": StreamProcessor._process_plain_text_line,
 }

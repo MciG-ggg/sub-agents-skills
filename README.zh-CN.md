@@ -175,6 +175,8 @@ Sub-Agents Skills 将代理的职责与执行后端分离。Markdown 文件定�
 | `gemini` | Gemini CLI（兼容模式） | `gemini` |
 | `opencode` | OpenCode | `opencode` |
 | `command-code` | Command Code | `command-code` |
+| `mcode` | MiniMax Code | `mcode` |
+| `pi` | Pi | `pi` |
 
 只需安装实际要使用的 CLI。使用 Google 模型时，建议选择 Antigravity CLI 1.1.12 或更高版本；已有的 Gemini CLI 配置仍然受支持。
 
@@ -211,7 +213,7 @@ permission: safe-edit
 
 | 字段 | 可选值 | 说明 |
 |------|--------|------|
-| `run-agent` | `codex`、`claude`、`cursor-agent`、`glm`、`kimi`、`grok`、`antigravity`、`gemini`、`opencode`、`command-code` | 执行该代理的后端 |
+| `run-agent` | `codex`、`claude`、`cursor-agent`、`glm`、`kimi`、`grok`、`antigravity`、`gemini`、`opencode`、`command-code`、`mcode`、`pi` | 执行该代理的后端 |
 | `model` | 后端支持的模型名称（可选） | 传给所选 CLI 的模型；省略时使用其已配置的默认值 |
 | `effort` | 后端或模型支持的值（可选） | 覆盖推理强度；省略时使用后端或模型的默认值 |
 | `permission` | `read-only`、`safe-edit`（默认）、`yolo` | 子代理运行时使用的审批与沙箱级别 |
@@ -222,9 +224,9 @@ permission: safe-edit
 
 **权限级别：**
 
-- `read-only`：用于调查和审查，并在后端支持时阻止直接编辑；shell 行为取决于后端，此模式并非安全边界（codex `-s read-only` / claude `--permission-mode plan` / cursor `--mode plan --sandbox enabled` / grok `--sandbox read-only` / antigravity `--mode plan --sandbox` / gemini `--approval-mode plan` / OpenCode 权限规则 / Command Code `--permission-mode plan`）
-- `safe-edit`：默认的非交互式编辑模式（codex `-s workspace-write` + `approval_policy=never` / claude `--permission-mode acceptEdits` / cursor `--trust --sandbox enabled` / grok `--sandbox workspace` / antigravity `--mode accept-edits --sandbox` / gemini `--approval-mode auto_edit` / OpenCode 权限规则 / Command Code `--yolo --permission-mode auto-accept`）
-- `yolo`：绕过所有审批和沙箱限制；只应在你信任的任务和环境中使用。
+- `read-only`：用于调查和审查，并在后端支持时阻止直接编辑；shell 行为取决于后端，此模式并非安全边界。Pi 只开放 `read`、`grep`、`find` 和 `ls`，并禁用 MCP 工具。MCode 不支持此权限。
+- `safe-edit`：默认的非交互式编辑模式。MCode 使用 `--permission smart`；无头运行遇到需要用户审批的操作时可能停止。Pi 使用已配置的工具，没有单独的 `safe-edit` 模式。
+- `yolo`：请求后端使用最高访问权限模式。MCode 使用 `--permission full`；Pi 没有单独的 `yolo` 模式。
 
 子代理没有标准输入，因此 runner 会以非交互模式调用各个后端。不同 CLI 的权限参数并不等价，实际隔离保证取决于所选 CLI。例如，Cursor 的沙箱会将受支持的 shell 命令限制在沙箱内，而 `--mode plan` 则提供只读约束。
 
@@ -328,7 +330,7 @@ permission: read-only
 | `--prompt` | 是* | 要委派的任务说明 |
 | `--cwd` | 是* | 工作目录（必须是绝对路径） |
 | `--timeout` | 否 | 超时时间，单位为毫秒（默认：600000） |
-| `--cli` | 否 | 强制指定 CLI：`codex`、`claude`、`cursor-agent`、`glm`、`kimi`、`grok`、`antigravity`、`gemini`、`opencode`、`command-code` |
+| `--cli` | 否 | 强制指定 CLI：`codex`、`claude`、`cursor-agent`、`glm`、`kimi`、`grok`、`antigravity`、`gemini`、`opencode`、`command-code`、`mcode`、`pi` |
 
 \* 不使用 `--list` 时必填
 
@@ -405,6 +407,22 @@ runner 会通过 `--model` 传递 `model`，并通过 OpenCode 的 `--variant` �
 
 </details>
 
+<a id="mcode"></a>
+<details>
+<summary>MiniMax Code</summary>
+
+安装 MiniMax Code，并运行 `mcode login` 登录或配置一个提供商。runner 使用 `mcode exec`。设置 `run-agent: mcode`；`model` 和 `effort` 均为可选项。MCode 将 `safe-edit` 映射为 `smart`，将 `yolo` 映射为 `full`。无头运行在 `smart` 模式下遇到需要用户审批的操作时可能停止。MCode 不支持 `read-only`。
+
+</details>
+
+<a id="pi"></a>
+<details>
+<summary>Pi</summary>
+
+安装 Pi 并配置提供商和模型。runner 使用 `pi --print`。设置 `run-agent: pi`；`model` 和 `effort` 均为可选项。`read-only` 模式只开放 `read`、`grep`、`find` 和 `ls`，并禁用 MCP 工具。Pi 没有单独的 `safe-edit` 和 `yolo` 权限模式。
+
+</details>
+
 ## 安全说明
 
 代理定义会作为系统提示词，直接控制子代理的行为。恶意代理定义可能会指示子代理读取敏感文件、执行有害命令或将数据泄露到外部。
@@ -428,6 +446,8 @@ graph LR
     B -.-> GM["Gemini CLI<br/>(兼容模式)"]
     B --> I["OpenCode"]
     B --> CC["Command Code"]
+    B --> MC["MiniMax Code"]
+    B --> PI["Pi"]
     I --> J["所选提供商/模型<br/>(平台托管 · 自带密钥 · 本地模型)"]
     CC --> J
     style B fill:#f5f5f5,stroke:#333
@@ -473,6 +493,12 @@ skills/sub-agents/
 **Command Code：**
 安装 Command Code 并配置模型。使用前运行 `command-code status` 检查身份验证状态。
 
+**MiniMax Code：**
+安装 MiniMax Code，并运行 `mcode login` 登录或配置一个提供商。
+
+**Pi：**
+安装 Pi 并配置提供商和模型。
+
 ### 找不到代理
 
 请检查：
@@ -492,6 +518,8 @@ skills/sub-agents/
 - Google Antigravity：`curl -fsSL https://antigravity.google/cli/install.sh | bash`
 - OpenCode：`brew install anomalyco/tap/opencode`
 - Command Code：`npm install -g command-code`
+- MiniMax Code：`curl -fsSL https://filecdn.minimax.chat/public/install.sh | bash`
+- Pi：`npm install -g --ignore-scripts @earendil-works/pi-coding-agent`
 
 如需使用 Gemini CLI，请通过 `npm install -g @google/gemini-cli` 安装。
 

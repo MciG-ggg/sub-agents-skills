@@ -174,6 +174,8 @@ Set `run-agent` in each agent definition. The value selects a backend; some back
 | `gemini` | Gemini CLI (compatibility) | `gemini` |
 | `opencode` | OpenCode | `opencode` |
 | `command-code` | Command Code | `command-code` |
+| `mcode` | MiniMax Code | `mcode` |
+| `pi` | Pi | `pi` |
 
 Install only the CLIs you plan to use. For Google models, prefer Antigravity CLI 1.1.12 or later; existing Gemini CLI configurations remain supported.
 
@@ -209,7 +211,7 @@ One-sentence purpose.
 
 | Field | Values | Description |
 |-------|--------|-------------|
-| `run-agent` | `codex`, `claude`, `cursor-agent`, `glm`, `kimi`, `grok`, `antigravity`, `gemini`, `opencode`, `command-code` | Which backend executes this agent |
+| `run-agent` | `codex`, `claude`, `cursor-agent`, `glm`, `kimi`, `grok`, `antigravity`, `gemini`, `opencode`, `command-code`, `mcode`, `pi` | Which backend executes this agent |
 | `model` | Backend-specific model name (optional) | Model passed to the selected CLI; omit to use its configured default |
 | `effort` | Backend/model-specific value (optional) | Reasoning-effort override; omit to use the backend/model default |
 | `permission` | `read-only`, `safe-edit` (default), `yolo` | Approval/sandbox level the sub-agent runs with |
@@ -223,9 +225,9 @@ field.
 
 **Permission levels:**
 
-- `read-only`: investigation/review mode that prevents direct edits where supported; shell behavior depends on the backend and this mode is not a security boundary (codex `-s read-only` / claude `--permission-mode plan` / cursor `--mode plan --sandbox enabled` / grok `--sandbox read-only` / antigravity `--mode plan --sandbox` / gemini `--approval-mode plan` / OpenCode permission rules / Command Code `--permission-mode plan`)
-- `safe-edit`: default non-interactive edit mode (codex `-s workspace-write` + `approval_policy=never` / claude `--permission-mode acceptEdits` / cursor `--trust --sandbox enabled` / grok `--sandbox workspace` / antigravity `--mode accept-edits --sandbox` / gemini `--approval-mode auto_edit` / OpenCode permission rules / Command Code `--yolo --permission-mode auto-accept`)
-- `yolo`: bypass all approvals and sandboxing; use it only for tasks and environments you trust.
+- `read-only`: investigation/review mode that prevents direct edits where supported; shell behavior depends on the backend and this mode is not a security boundary. Pi allows `read`, `grep`, `find`, and `ls`, and excludes MCP tools. MCode does not support this permission.
+- `safe-edit`: default non-interactive edit mode. MCode uses `--permission smart`; a headless run can stop when an action needs user approval. Pi uses its configured tools and has no separate `safe-edit` mode.
+- `yolo`: asks the backend to use its highest-access mode. MCode uses `--permission full`; Pi has no separate `yolo` mode.
 
 Sub-agents have no stdin, so the runner uses non-interactive backend modes. The
 isolation guarantees depend on the selected CLI; permission flags are not
@@ -333,7 +335,7 @@ To customize: `export SUB_AGENTS_DIR=/custom/path`
 | `--prompt` | Yes* | Task description to delegate |
 | `--cwd` | Yes* | Working directory (absolute path) |
 | `--timeout` | No | Timeout ms (default: 600000) |
-| `--cli` | No | Force CLI: `codex`, `claude`, `cursor-agent`, `glm`, `kimi`, `grok`, `antigravity`, `gemini`, `opencode`, `command-code` |
+| `--cli` | No | Force CLI: `codex`, `claude`, `cursor-agent`, `glm`, `kimi`, `grok`, `antigravity`, `gemini`, `opencode`, `command-code`, `mcode`, `pi` |
 
 *Required when not using --list
 
@@ -421,6 +423,22 @@ Set `run-agent: command-code`; `model` and `effort` are optional.
 
 </details>
 
+<a id="mcode"></a>
+<details>
+<summary>MiniMax Code</summary>
+
+Install MiniMax Code and sign in with `mcode login` or configure a provider. The runner uses `mcode exec`. Set `run-agent: mcode`; `model` and `effort` are optional. MCode maps `safe-edit` to `smart` and `yolo` to `full`. A headless run can stop when `smart` needs user approval. MCode does not support `read-only`.
+
+</details>
+
+<a id="pi"></a>
+<details>
+<summary>Pi</summary>
+
+Install Pi and configure a provider and model. The runner uses `pi --print`. Set `run-agent: pi`; `model` and `effort` are optional. For `read-only`, the runner allows `read`, `grep`, `find`, and `ls` and excludes MCP tools. Pi has no separate permission modes for `safe-edit` and `yolo`.
+
+</details>
+
 ## Security
 
 Agent definitions are system prompts that control what the sub-agent does. A malicious agent definition could instruct the sub-agent to read sensitive files, execute harmful commands, or exfiltrate data.
@@ -446,6 +464,8 @@ graph LR
     B -.-> GM["Gemini CLI<br/>(compatibility)"]
     B --> I["OpenCode"]
     B --> CC["Command Code"]
+    B --> MC["MiniMax Code"]
+    B --> PI["Pi"]
     I --> J["Selected provider/model<br/>(managed · BYOK · local)"]
     CC --> J
     style B fill:#f5f5f5,stroke:#333
@@ -498,6 +518,12 @@ and a direct `opencode run --format json` smoke test before using the backend.
 Install Command Code and configure a model. Run `command-code status` to check
 authentication before using the backend.
 
+**MiniMax Code:**
+Install MiniMax Code and sign in with `mcode login` or configure a provider.
+
+**Pi:**
+Install Pi and configure a provider and model.
+
 ### Agent not found
 
 Check that:
@@ -515,6 +541,8 @@ Install the required CLI:
 - Google Antigravity: `curl -fsSL https://antigravity.google/cli/install.sh | bash`
 - OpenCode: `brew install anomalyco/tap/opencode`
 - Command Code: `npm install -g command-code`
+- MiniMax Code: `curl -fsSL https://filecdn.minimax.chat/public/install.sh | bash`
+- Pi: `npm install -g --ignore-scripts @earendil-works/pi-coding-agent`
 
 If you use Gemini CLI, install it with `npm install -g @google/gemini-cli`.
 
