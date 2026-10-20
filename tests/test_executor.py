@@ -51,6 +51,33 @@ class TestBuildFinalResponse:
         )
         assert r == {"result": "ok", "exit_code": 0, "status": "success", "cli": "codex"}
 
+    @pytest.mark.parametrize(
+        ("cli", "result_status", "expected_status"),
+        [
+            ("mcode", "success", "success"),
+            ("mcode", "error", "error"),
+            ("pi", "success", "success"),
+            ("pi", "error", "error"),
+        ],
+    )
+    def test_mcode_and_pi_preserve_parsed_run_status(
+        self, cli: str, result_status: str, expected_status: str
+    ) -> None:
+        # BUILD
+        result: dict[str, object] = {
+            "type": "result",
+            "result": "output",
+            "status": result_status,
+        }
+
+        # OPERATE
+        response = build_final_response(
+            cli=cli, returncode=0, result=result, stdout_lines=[], stderr=""
+        )
+
+        # CHECK
+        assert response["status"] == expected_status
+
     def test_sigterm_with_result_is_success(self) -> None:
         # CLI was terminated after the result event — that's still success
         r = build_final_response(

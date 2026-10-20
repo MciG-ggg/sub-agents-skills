@@ -66,18 +66,25 @@ class TestBuildCommand:
             set(spec.permissions) == set(PERMISSION_VALUES) for spec in _BACKEND_SPECS.values()
         )
 
-    def test_mcode_and_pi_use_headless_commands(self) -> None:
+    @pytest.mark.parametrize(
+        ("cli", "expected_args"),
+        [
+            ("mcode", ["exec", "--output-format", "json", "--", "- list files"]),
+            ("pi", ["--no-session", "--mode", "json", "--print", "--", "- list files"]),
+        ],
+    )
+    def test_mcode_and_pi_separate_leading_dash_prompts(
+        self, cli: str, expected_args: list[str]
+    ) -> None:
         # BUILD
-        expected = {
-            "mcode": ("mcode", ["exec", "Task"]),
-            "pi": ("pi", ["--no-session", "--print", "Task"]),
-        }
+        prompt = "- list files"
 
         # OPERATE
-        actual = {cli: build_command(cli, "Task") for cli in expected}
+        command, args = build_command(cli, prompt)
 
         # CHECK
-        assert actual == expected
+        assert command == cli
+        assert args == expected_args
 
     def test_unknown_cli_raises_error(self) -> None:
         with pytest.raises(ValueError, match="Unsupported CLI"):
@@ -176,19 +183,21 @@ class TestBuildInvocationArgs:
             "high",
             "--append-system-prompt",
             "cwd: /test/cwd\n\nAgent definition",
+            "--output-format",
+            "json",
+            "--",
             "User task",
         ]
 
-    def test_mcode_rejects_read_only_permission(self) -> None:
+    def test_mcode_read_only_uses_smart_permission(self) -> None:
         # BUILD
         invocation = _inv("mcode", permission="read-only")
 
         # OPERATE
-        with pytest.raises(ValueError, match="read-only") as error:
-            build_invocation_args(invocation)
+        process = build_invocation_args(invocation)
 
         # CHECK
-        assert error.value.args == ("CLI 'mcode' does not support permission 'read-only'.",)
+        assert process.args[:3] == ["exec", "--permission", "smart"]
 
     def test_pi_arguments_include_read_only_tools_and_model_effort(self) -> None:
         # BUILD
@@ -211,7 +220,10 @@ class TestBuildInvocationArgs:
             "--append-system-prompt",
             "cwd: /test/cwd\n\nAgent definition",
             "--no-session",
+            "--mode",
+            "json",
             "--print",
+            "--",
             "User task",
         ]
 

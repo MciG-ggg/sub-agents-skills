@@ -224,9 +224,9 @@ permission: safe-edit
 
 **权限级别：**
 
-- `read-only`：用于调查和审查，并在后端支持时阻止直接编辑；shell 行为取决于后端，此模式并非安全边界。Pi 只开放 `read`、`grep`、`find` 和 `ls`，并禁用 MCP 工具。MCode 不支持此权限。
-- `safe-edit`：默认的非交互式编辑模式。MCode 使用 `--permission smart`；无头运行遇到需要用户审批的操作时可能停止。Pi 使用已配置的工具，没有单独的 `safe-edit` 模式。
-- `yolo`：请求后端使用最高访问权限模式。MCode 使用 `--permission full`；Pi 没有单独的 `yolo` 模式。
+- `read-only`：用于调查和审查，并在后端支持时阻止直接编辑；shell 行为取决于后端，此模式并非安全边界（codex `-s read-only` / claude `--permission-mode plan` / cursor `--mode plan --sandbox enabled` / grok `--sandbox read-only` / antigravity `--mode plan --sandbox` / gemini `--approval-mode plan` / OpenCode 权限规则 / Command Code `--permission-mode plan`）。MCode 将此权限映射为 `--permission smart`，与 `safe-edit` 相同，因此它不会阻止直接编辑。Pi 只开放 `read`、`grep`、`find` 和 `ls`，并禁用 MCP 工具。
+- `safe-edit`：默认的非交互式编辑模式（codex `-s workspace-write` + `approval_policy=never` / claude `--permission-mode acceptEdits` / cursor `--trust --sandbox enabled` / grok `--sandbox workspace` / antigravity `--mode accept-edits --sandbox` / gemini `--approval-mode auto_edit` / OpenCode 权限规则 / Command Code `--yolo --permission-mode auto-accept`）。MCode 使用 `--permission smart`；Pi 使用已配置的工具，没有单独的 `safe-edit` 模式。用户在 MCode 测试中发现，`smart` 拒绝了工作区外的写入，但运行继续。模型通过 `cd ..` 切换到上级目录，并用相对路径重试；runner 最终报告 `succeeded`。
+- `yolo`：绕过所有审批和沙箱限制；只应在你信任的任务和环境中使用。MCode 使用 `--permission full`；Pi 没有单独的 `yolo` 模式。
 
 子代理没有标准输入，因此 runner 会以非交互模式调用各个后端。不同 CLI 的权限参数并不等价，实际隔离保证取决于所选 CLI。例如，Cursor 的沙箱会将受支持的 shell 命令限制在沙箱内，而 `--mode plan` 则提供只读约束。
 
@@ -411,7 +411,7 @@ runner 会通过 `--model` 传递 `model`，并通过 OpenCode 的 `--variant` �
 <details>
 <summary>MiniMax Code</summary>
 
-安装 MiniMax Code，并运行 `mcode login` 登录或配置一个提供商。runner 使用 `mcode exec`。设置 `run-agent: mcode`；`model` 和 `effort` 均为可选项。MCode 将 `safe-edit` 映射为 `smart`，将 `yolo` 映射为 `full`。无头运行在 `smart` 模式下遇到需要用户审批的操作时可能停止。MCode 不支持 `read-only`。
+安装 MiniMax Code，并运行 `mcode login` 登录或配置一个提供商。runner 使用 `mcode exec --output-format json`。设置 `run-agent: mcode`；`model` 和 `effort` 均为可选项。MCode 将 `read-only` 和 `safe-edit` 映射为 `--permission smart`，将 `yolo` 映射为 `--permission full`。当 `smart` 拒绝需要审批的工具调用时，无头运行不会停止。用户在测试中发现，它拒绝了工作区外的写入。模型通过 `cd ..` 切换到上级目录，并用相对路径重试；runner 最终报告 `succeeded`。
 
 </details>
 
@@ -419,7 +419,7 @@ runner 会通过 `--model` 传递 `model`，并通过 OpenCode 的 `--variant` �
 <details>
 <summary>Pi</summary>
 
-安装 Pi 并配置提供商和模型。runner 使用 `pi --print`。设置 `run-agent: pi`；`model` 和 `effort` 均为可选项。`read-only` 模式只开放 `read`、`grep`、`find` 和 `ls`，并禁用 MCP 工具。Pi 没有单独的 `safe-edit` 和 `yolo` 权限模式。
+安装 Pi 并配置提供商和模型。runner 使用 `pi --mode json --print`。设置 `run-agent: pi`；`model` 和 `effort` 均为可选项。`read-only` 模式只开放 `read`、`grep`、`find` 和 `ls`，并禁用 MCP 工具。Pi 没有单独的 `safe-edit` 和 `yolo` 权限模式。
 
 </details>
 

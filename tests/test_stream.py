@@ -13,18 +13,169 @@ class TestStreamProcessor:
     def test_supported_clis_have_line_processors(self) -> None:
         assert set(_LINE_PROCESSORS) == set(SUPPORTED_CLIS)
 
-    @pytest.mark.parametrize("cli", ["mcode", "pi"])
-    def test_plain_text_backend_does_not_parse_json_looking_output(self, cli: str) -> None:
+    def test_mcode_success_result(self) -> None:
         # BUILD
-        processor = StreamProcessor(cli)
-        output = '{"type":"result","result":"agent text"}'
+        processor = StreamProcessor("mcode")
+        output = json.dumps({"type": "exec.result", "status": "succeeded", "output": "done"})
 
         # OPERATE
         terminal = processor.process_line(output)
 
         # CHECK
-        assert terminal is False
-        assert processor.get_result() is None
+        assert terminal is True
+        assert processor.get_result() == {
+            "type": "result",
+            "result": "done",
+            "status": "success",
+        }
+
+    def test_mcode_failed_result(self) -> None:
+        # BUILD
+        processor = StreamProcessor("mcode")
+        output = json.dumps(
+            {"type": "exec.result", "status": "failed", "output": "", "error": "provider error"}
+        )
+
+        # OPERATE
+        terminal = processor.process_line(output)
+
+        # CHECK
+        assert terminal is True
+        assert processor.get_result() == {
+            "type": "result",
+            "result": "",
+            "status": "error",
+            "error": "provider error",
+        }
+
+    @pytest.mark.parametrize("backend_status", ["timeout", "cancelled", "limit_exceeded"])
+    def test_mcode_incomplete_result_is_partial(self, backend_status: str) -> None:
+        # BUILD
+        processor = StreamProcessor("mcode")
+        output = json.dumps(
+            {"type": "exec.result", "status": backend_status, "output": "partial output"}
+        )
+
+        # OPERATE
+        terminal = processor.process_line(output)
+
+        # CHECK
+        assert terminal is True
+        assert processor.get_result() == {
+            "type": "result",
+            "result": "partial output",
+            "status": "partial",
+        }
+
+    def test_mcode_unknown_result_status_is_error(self) -> None:
+        # BUILD
+        processor = StreamProcessor("mcode")
+        output = json.dumps({"type": "exec.result", "status": "unknown", "output": ""})
+
+        # OPERATE
+        terminal = processor.process_line(output)
+
+        # CHECK
+        assert terminal is True
+        assert processor.get_result() == {
+            "type": "result",
+            "result": "",
+            "status": "error",
+            "error": "MCode reported unknown",
+        }
+
+    def test_pi_success_result_ignores_tool_use_message_end(self) -> None:
+        # BUILD
+        processor = StreamProcessor("pi")
+        tool_use = json.dumps(
+            {
+                "type": "message_end",
+                "message": {
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": "working"}],
+                    "stopReason": "toolUse",
+                },
+            }
+        )
+        final = json.dumps(
+            {
+                "type": "message_end",
+                "message": {
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": "done"}],
+                    "stopReason": "stop",
+                },
+            }
+        )
+
+        # OPERATE
+        intermediate = processor.process_line(tool_use)
+        terminal = processor.process_line(final)
+
+        # CHECK
+        assert intermediate is False
+        assert terminal is True
+        assert processor.get_result() == {
+            "type": "result",
+            "result": "done",
+            "status": "success",
+            "stop_reason": "stop",
+        }
+
+    def test_pi_error_result_uses_error_message(self) -> None:
+        # BUILD
+        processor = StreamProcessor("pi")
+        output = json.dumps(
+            {
+                "type": "message_end",
+                "message": {
+                    "role": "assistant",
+                    "content": [],
+                    "stopReason": "error",
+                    "errorMessage": "provider error",
+                },
+            }
+        )
+
+        # OPERATE
+        terminal = processor.process_line(output)
+
+        # CHECK
+        assert terminal is True
+        assert processor.get_result() == {
+            "type": "result",
+            "result": "",
+            "status": "error",
+            "stop_reason": "error",
+            "error": "provider error",
+        }
+
+    @pytest.mark.parametrize("stop_reason", ["length", "aborted"])
+    def test_pi_incomplete_message_is_partial(self, stop_reason: str) -> None:
+        # BUILD
+        processor = StreamProcessor("pi")
+        output = json.dumps(
+            {
+                "type": "message_end",
+                "message": {
+                    "role": "assistant",
+                    "content": [{"type": "text", "text": "partial output"}],
+                    "stopReason": stop_reason,
+                },
+            }
+        )
+
+        # OPERATE
+        terminal = processor.process_line(output)
+
+        # CHECK
+        assert terminal is True
+        assert processor.get_result() == {
+            "type": "result",
+            "result": "partial output",
+            "status": "partial",
+            "stop_reason": stop_reason,
+        }
 
     @pytest.mark.parametrize("cli", ["claude", "glm", "kimi"])
     def test_claude_family_result(self, cli: str) -> None:
