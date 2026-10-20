@@ -84,6 +84,7 @@ class StreamProcessor:
         self.gemini_parts: list[str] = []
         self.codex_messages: list[str] = []
         self.opencode_parts: list[str] = []
+        self.pi_message: StreamData | None = None
 
     def _process_gemini_line(self, data: StreamData) -> bool:
         if data.get("type") == "message" and data.get("role") == "assistant":
@@ -235,41 +236,36 @@ class StreamProcessor:
             return False
 
         backend_status = data.get("status")
-        if not isinstance(backend_status, str):
-            return False
-        output = data.get("output", "")
-        if not isinstance(output, str):
-            return False
-
+        output = data.get("output")
+        text = output if isinstance(output, str) else ""
         if backend_status == "succeeded":
             status = "success"
-        elif backend_status == "failed":
-            status = "error"
-        elif backend_status in ("timeout", "cancelled", "limit_exceeded"):
+        elif backend_status in ("timeout", "cancelled", "limit_exceeded") and text:
             status = "partial"
         else:
+            # Unfinished runs usually omit output and leave the reason on stderr.
             status = "error"
 
-        result: StreamData = {"type": "result", "result": output, "status": status}
+        result: StreamData = {"type": "result", "result": text, "status": status}
         error = data.get("error")
-        if isinstance(error, str) and error.strip():
-            result["error"] = error
-        elif status == "error":
-            result["error"] = f"MCode reported {backend_status}"
+        message = error.get("message") if isinstance(error, dict) else None
+        if isinstance(message, str):
+            result["error"] = message
         self.result_json = result
         return True
 
     def _process_pi_line(self, data: StreamData) -> bool:
-        if data.get("type") != "message_end":
-            return False
         message = data.get("message")
-        if not isinstance(message, dict) or message.get("role") != "assistant":
+        if data.get("type") == "message_end" and isinstance(message, dict):
+            if message.get("role") == "assistant":
+                self.pi_message = message
+            return False
+        # Pi can retry or recover after a failed message until it settles.
+        if data.get("type") != "agent_settled" or self.pi_message is None:
             return False
 
+        message = self.pi_message
         stop_reason = message.get("stopReason")
-        if stop_reason == "toolUse":
-            return False
-
         text_parts: list[str] = []
         content = message.get("content")
         if isinstance(content, list):

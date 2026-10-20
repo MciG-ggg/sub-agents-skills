@@ -159,10 +159,9 @@ _PI_PERMISSIONS = {
 
 def permission_flags(cli: str, permission: str) -> list[str]:
     try:
-        flags = _BACKEND_SPECS[cli].permissions[permission]
+        return list(_BACKEND_SPECS[cli].permissions[permission])
     except KeyError as e:
         raise ValueError(f"No permission mapping for cli={cli!r}, permission={permission!r}") from e
-    return list(flags)
 
 
 def effort_flags(cli: str, effort: str | None) -> list[str]:
@@ -213,6 +212,7 @@ def _build_claude_args(inv: AgentInvocation) -> ProcessInvocation:
     system_prompt = f"cwd: {inv.cwd}\n\n{inv.system_context}"
     command, base_args = build_command(inv.cli, inv.prompt)
     if inv.cli == "mcode":
+        # MCode rejects run options placed before the exec subcommand.
         run, *base_args = base_args
         args = [run, *perm, "--append-system-prompt", system_prompt, *base_args]
     else:

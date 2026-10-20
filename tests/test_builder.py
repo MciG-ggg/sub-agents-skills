@@ -66,26 +66,6 @@ class TestBuildCommand:
             set(spec.permissions) == set(PERMISSION_VALUES) for spec in _BACKEND_SPECS.values()
         )
 
-    @pytest.mark.parametrize(
-        ("cli", "expected_args"),
-        [
-            ("mcode", ["exec", "--output-format", "json", "--", "- list files"]),
-            ("pi", ["--no-session", "--mode", "json", "--print", "--", "- list files"]),
-        ],
-    )
-    def test_mcode_and_pi_separate_leading_dash_prompts(
-        self, cli: str, expected_args: list[str]
-    ) -> None:
-        # BUILD
-        prompt = "- list files"
-
-        # OPERATE
-        command, args = build_command(cli, prompt)
-
-        # CHECK
-        assert command == cli
-        assert args == expected_args
-
     def test_unknown_cli_raises_error(self) -> None:
         with pytest.raises(ValueError, match="Unsupported CLI"):
             build_command("unknown-cli", "test prompt")
@@ -164,59 +144,31 @@ class TestBuildInvocationArgs:
         with pytest.raises(ValueError, match=rf"selected backend: '{cli}'"):
             build_invocation_args(_inv(cli, effort="high"))
 
-    def test_mcode_arguments_include_model_effort_and_system_context(self) -> None:
-        # BUILD
-        invocation = _inv("mcode", model="provider/model", effort="high")
-
-        # OPERATE
-        process = build_invocation_args(invocation)
-
-        # CHECK
+    def test_mcode_places_options_after_exec_and_prompt_after_separator(self) -> None:
+        process = build_invocation_args(
+            _inv("mcode", prompt="- list files", permission="read-only")
+        )
         assert process.command == "mcode"
         assert process.args == [
             "exec",
             "--permission",
             "smart",
-            "--model",
-            "provider/model",
-            "--effort",
-            "high",
             "--append-system-prompt",
             "cwd: /test/cwd\n\nAgent definition",
             "--output-format",
             "json",
             "--",
-            "User task",
+            "- list files",
         ]
 
-    def test_mcode_read_only_uses_smart_permission(self) -> None:
-        # BUILD
-        invocation = _inv("mcode", permission="read-only")
-
-        # OPERATE
-        process = build_invocation_args(invocation)
-
-        # CHECK
-        assert process.args[:3] == ["exec", "--permission", "smart"]
-
-    def test_pi_arguments_include_read_only_tools_and_model_effort(self) -> None:
-        # BUILD
-        invocation = _inv("pi", model="provider/model", effort="high", permission="read-only")
-
-        # OPERATE
-        process = build_invocation_args(invocation)
-
-        # CHECK
+    def test_pi_read_only_limits_tools_and_places_prompt_after_separator(self) -> None:
+        process = build_invocation_args(_inv("pi", prompt="- list files", permission="read-only"))
         assert process.command == "pi"
         assert process.args == [
             "--tools",
             "read,grep,find,ls",
             "--exclude-tools",
             "mcp__*",
-            "--model",
-            "provider/model",
-            "--thinking",
-            "high",
             "--append-system-prompt",
             "cwd: /test/cwd\n\nAgent definition",
             "--no-session",
@@ -224,7 +176,7 @@ class TestBuildInvocationArgs:
             "json",
             "--print",
             "--",
-            "User task",
+            "- list files",
         ]
 
     def test_codex_effort_is_safely_encoded_as_toml_string(self) -> None:

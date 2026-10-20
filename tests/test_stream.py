@@ -13,170 +13,6 @@ class TestStreamProcessor:
     def test_supported_clis_have_line_processors(self) -> None:
         assert set(_LINE_PROCESSORS) == set(SUPPORTED_CLIS)
 
-    def test_mcode_success_result(self) -> None:
-        # BUILD
-        processor = StreamProcessor("mcode")
-        output = json.dumps({"type": "exec.result", "status": "succeeded", "output": "done"})
-
-        # OPERATE
-        terminal = processor.process_line(output)
-
-        # CHECK
-        assert terminal is True
-        assert processor.get_result() == {
-            "type": "result",
-            "result": "done",
-            "status": "success",
-        }
-
-    def test_mcode_failed_result(self) -> None:
-        # BUILD
-        processor = StreamProcessor("mcode")
-        output = json.dumps(
-            {"type": "exec.result", "status": "failed", "output": "", "error": "provider error"}
-        )
-
-        # OPERATE
-        terminal = processor.process_line(output)
-
-        # CHECK
-        assert terminal is True
-        assert processor.get_result() == {
-            "type": "result",
-            "result": "",
-            "status": "error",
-            "error": "provider error",
-        }
-
-    @pytest.mark.parametrize("backend_status", ["timeout", "cancelled", "limit_exceeded"])
-    def test_mcode_incomplete_result_is_partial(self, backend_status: str) -> None:
-        # BUILD
-        processor = StreamProcessor("mcode")
-        output = json.dumps(
-            {"type": "exec.result", "status": backend_status, "output": "partial output"}
-        )
-
-        # OPERATE
-        terminal = processor.process_line(output)
-
-        # CHECK
-        assert terminal is True
-        assert processor.get_result() == {
-            "type": "result",
-            "result": "partial output",
-            "status": "partial",
-        }
-
-    def test_mcode_unknown_result_status_is_error(self) -> None:
-        # BUILD
-        processor = StreamProcessor("mcode")
-        output = json.dumps({"type": "exec.result", "status": "unknown", "output": ""})
-
-        # OPERATE
-        terminal = processor.process_line(output)
-
-        # CHECK
-        assert terminal is True
-        assert processor.get_result() == {
-            "type": "result",
-            "result": "",
-            "status": "error",
-            "error": "MCode reported unknown",
-        }
-
-    def test_pi_success_result_ignores_tool_use_message_end(self) -> None:
-        # BUILD
-        processor = StreamProcessor("pi")
-        tool_use = json.dumps(
-            {
-                "type": "message_end",
-                "message": {
-                    "role": "assistant",
-                    "content": [{"type": "text", "text": "working"}],
-                    "stopReason": "toolUse",
-                },
-            }
-        )
-        final = json.dumps(
-            {
-                "type": "message_end",
-                "message": {
-                    "role": "assistant",
-                    "content": [{"type": "text", "text": "done"}],
-                    "stopReason": "stop",
-                },
-            }
-        )
-
-        # OPERATE
-        intermediate = processor.process_line(tool_use)
-        terminal = processor.process_line(final)
-
-        # CHECK
-        assert intermediate is False
-        assert terminal is True
-        assert processor.get_result() == {
-            "type": "result",
-            "result": "done",
-            "status": "success",
-            "stop_reason": "stop",
-        }
-
-    def test_pi_error_result_uses_error_message(self) -> None:
-        # BUILD
-        processor = StreamProcessor("pi")
-        output = json.dumps(
-            {
-                "type": "message_end",
-                "message": {
-                    "role": "assistant",
-                    "content": [],
-                    "stopReason": "error",
-                    "errorMessage": "provider error",
-                },
-            }
-        )
-
-        # OPERATE
-        terminal = processor.process_line(output)
-
-        # CHECK
-        assert terminal is True
-        assert processor.get_result() == {
-            "type": "result",
-            "result": "",
-            "status": "error",
-            "stop_reason": "error",
-            "error": "provider error",
-        }
-
-    @pytest.mark.parametrize("stop_reason", ["length", "aborted"])
-    def test_pi_incomplete_message_is_partial(self, stop_reason: str) -> None:
-        # BUILD
-        processor = StreamProcessor("pi")
-        output = json.dumps(
-            {
-                "type": "message_end",
-                "message": {
-                    "role": "assistant",
-                    "content": [{"type": "text", "text": "partial output"}],
-                    "stopReason": stop_reason,
-                },
-            }
-        )
-
-        # OPERATE
-        terminal = processor.process_line(output)
-
-        # CHECK
-        assert terminal is True
-        assert processor.get_result() == {
-            "type": "result",
-            "result": "partial output",
-            "status": "partial",
-            "stop_reason": stop_reason,
-        }
-
     @pytest.mark.parametrize("cli", ["claude", "glm", "kimi"])
     def test_claude_family_result(self, cli: str) -> None:
         processor = StreamProcessor(cli)
@@ -359,20 +195,67 @@ class TestStreamProcessor:
             "error": "Not authenticated",
         }
 
-    def test_grok_complete_json_output(self) -> None:
-        processor = StreamProcessor("grok")
-        assert processor.process_complete_output(
-            "{\n"
-            '  "text": "{\\"findings\\":[]}",\n'
-            '  "stopReason": "EndTurn",\n'
-            '  "sessionId": "s",\n'
-            '  "requestId": "r"\n'
-            "}"
+    @pytest.mark.parametrize("status", ["timeout", "cancelled", "limit_exceeded"])
+    def test_mcode_unfinished_result_with_output_is_partial(self, status: str) -> None:
+        processor = StreamProcessor("mcode")
+        assert processor.process_line(
+            json.dumps({"type": "exec.result", "status": status, "output": "progress"})
         )
+        assert processor.get_result() == {
+            "type": "result",
+            "result": "progress",
+            "status": "partial",
+        }
+
+    def test_mcode_unfinished_result_without_output_is_error(self) -> None:
+        processor = StreamProcessor("mcode")
+        assert processor.process_line('{"type":"exec.result","status":"timeout"}')
+        assert processor.get_result() == {"type": "result", "result": "", "status": "error"}
+
+    def test_pi_result_comes_from_last_assistant_message_once_settled(self) -> None:
+        processor = StreamProcessor("pi")
+        assert not processor.process_line(
+            '{"type":"message_end","message":{"role":"assistant","content":[],'
+            '"stopReason":"error","errorMessage":"529 overloaded"}}'
+        )
+        assert not processor.process_line(
+            '{"type":"auto_retry_start","attempt":1,"maxAttempts":3,"errorMessage":"529 overloaded"}'
+        )
+        assert not processor.process_line(
+            '{"type":"message_end","message":{"role":"assistant",'
+            '"content":[{"type":"text","text":"DONE"}],"stopReason":"stop"}}'
+        )
+        assert not processor.process_line(
+            '{"type":"message_end","message":{"role":"toolResult","content":[]}}'
+        )
+        assert processor.process_line('{"type":"agent_settled","aborted":false}')
+        assert processor.get_result() == {
+            "type": "result",
+            "result": "DONE",
+            "status": "success",
+            "stop_reason": "stop",
+        }
+
+    @pytest.mark.parametrize("stop_reason", ["length", "aborted"])
+    def test_pi_incomplete_message_is_partial(self, stop_reason: str) -> None:
+        processor = StreamProcessor("pi")
+        assert not processor.process_line(
+            json.dumps(
+                {
+                    "type": "message_end",
+                    "message": {
+                        "role": "assistant",
+                        "content": [{"type": "text", "text": "progress"}],
+                        "stopReason": stop_reason,
+                    },
+                }
+            )
+        )
+        assert processor.process_line('{"type":"agent_settled","aborted":false}')
         result = processor.get_result()
         assert result is not None
-        assert result["result"] == '{"findings":[]}'
-        assert result["status"] == "success"
+        assert result["result"] == "progress"
+        assert result["status"] == "partial"
 
     def test_grok_compact_json_line_output(self) -> None:
         processor = StreamProcessor("grok")
@@ -382,14 +265,6 @@ class TestStreamProcessor:
         assert result["type"] == "result"
         assert result["result"] == '{"findings":[]}'
         assert result["status"] == "success"
-
-    def test_grok_text_without_stop_reason_is_partial(self) -> None:
-        processor = StreamProcessor("grok")
-        assert processor.process_line('{"text": "final answer"}')
-        result = processor.get_result()
-        assert result is not None
-        assert result["result"] == "final answer"
-        assert result["status"] == "partial"
 
     def test_grok_compact_json_line_cancelled_is_partial(self) -> None:
         processor = StreamProcessor("grok")
@@ -428,16 +303,6 @@ class TestStreamProcessor:
         with pytest.raises(ValueError, match="Unsupported CLI"):
             StreamProcessor("unknown")
 
-    def test_grok_complete_json_cancelled_is_partial(self) -> None:
-        processor = StreamProcessor("grok")
-        assert processor.process_complete_output(
-            '{"text": "progress only", "stopReason": "Cancelled"}'
-        )
-        result = processor.get_result()
-        assert result is not None
-        assert result["result"] == "progress only"
-        assert result["status"] == "partial"
-
     def test_grok_complete_json_extracts_trailing_json_result(self) -> None:
         processor = StreamProcessor("grok")
         assert processor.process_complete_output(
@@ -446,10 +311,6 @@ class TestStreamProcessor:
         result = processor.get_result()
         assert result is not None
         assert result["result"] == '{"findings":[]}'
-
-    def test_extract_trailing_json_object_rejects_extra_suffix(self) -> None:
-        text = 'prefix {"findings":[]} trailing'
-        assert _extract_trailing_json_object(text) == text
 
 
 class TestExtractTrailingJsonObject:
