@@ -155,6 +155,9 @@ override; execution fails with a corrective error when neither is specified.
 | `run-agent` | `codex`, `claude`, `cursor-agent`, `glm`, `kimi`, `grok`, `antigravity`, `gemini`, `opencode`, `command-code`, `mcode`, `pi` | Which CLI executes this agent |
 | `model` | Backend-specific model name (optional) | Model passed to the selected CLI; omit to use its configured default |
 | `effort` | Backend/model-specific reasoning level or OpenCode variant (optional) | Advanced: forwarded as an opaque value. Confirm support for the selected model before setting; omit to use its default. Unsupported on `cursor-agent` and `gemini` |
-| `permission` | `read-only`, `safe-edit` (default), `yolo` | Investigation, workspace edits, or the backend's highest-access mode |
+| `permission` | `read-only`, `safe-edit` (default), `yolo` | `read-only` for investigation, `safe-edit` for workspace edits, or `yolo` to bypass approvals and sandboxing |
 
-MCode maps `read-only` and `safe-edit` to `--permission smart`. This mode does not stop a headless run when it denies a tool call that needs approval. In the owner's test, `smart` denied a write outside the workspace. The model changed to the parent directory with `cd ..`, retried with a relative path, and the runner reported `succeeded`. MCode maps `yolo` to `--permission full`. Pi restricts `read-only` to `read`, `grep`, `find`, and `ls`, and excludes MCP tools. Pi has no separate permission modes for `safe-edit` and `yolo`.
+Backend-specific `permission` behavior:
+
+- `mcode`: `read-only` and `safe-edit` both use `--permission smart`, which allows direct edits. A tool call that `smart` denies leaves the run going, so the run can still return `success`. `yolo` uses `--permission full`.
+- `pi`: `read-only` enables only `read`, `grep`, `find`, and `ls`, so the agent has no shell or MCP tools. `safe-edit` and `yolo` both enable Pi's default tools, including `bash`, `edit`, and `write`.

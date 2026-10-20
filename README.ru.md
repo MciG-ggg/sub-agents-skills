@@ -224,9 +224,9 @@ permission: safe-edit
 
 **Уровни доступа:**
 
-- `read-only`: режим исследования и ревью, запрещающий прямое редактирование там, где это поддерживает бэкенд; поведение shell зависит от бэкенда, и этот режим не является границей безопасности (codex `-s read-only` / claude `--permission-mode plan` / cursor `--mode plan --sandbox enabled` / grok `--sandbox read-only` / antigravity `--mode plan --sandbox` / gemini `--approval-mode plan` / правила разрешений OpenCode / режим plan в Command Code). MCode сопоставляет `read-only` с `--permission smart`, как и `safe-edit`, поэтому этот режим не блокирует прямое редактирование. Pi разрешает только `read`, `grep`, `find` и `ls` и исключает MCP-инструменты.
-- `safe-edit`: стандартный неинтерактивный режим редактирования (codex `-s workspace-write` + `approval_policy=never` / claude `--permission-mode acceptEdits` / cursor `--trust --sandbox enabled` / grok `--sandbox workspace` / antigravity `--mode accept-edits --sandbox` / gemini `--approval-mode auto_edit` / правила раннера для OpenCode и Command Code). MCode использует `--permission smart`; Pi использует настроенные инструменты и не имеет отдельного режима `safe-edit`. В тесте владельца `smart` запретил запись за пределами рабочей области, но запуск продолжился. Модель перешла в родительский каталог с помощью `cd ..`, повторила запись с относительным путём, и раннер сообщил `succeeded`.
-- `yolo`: обходит все подтверждения и ограничения песочницы; используйте этот режим только для задач и сред, которым вы доверяете. MCode использует `--permission full`; у Pi нет отдельного режима `yolo`.
+- `read-only`: режим исследования и ревью, запрещающий прямое редактирование там, где это поддерживает бэкенд; поведение shell зависит от бэкенда, и этот режим не является границей безопасности (codex `-s read-only` / claude `--permission-mode plan` / cursor `--mode plan --sandbox enabled` / grok `--sandbox read-only` / antigravity `--mode plan --sandbox` / gemini `--approval-mode plan` / правила разрешений OpenCode / режим plan в Command Code / MCode `--permission smart`, который всё равно разрешает прямое редактирование / Pi `--tools read,grep,find,ls` без MCP-инструментов)
+- `safe-edit`: стандартный неинтерактивный режим редактирования (codex `-s workspace-write` + `approval_policy=never` / claude `--permission-mode acceptEdits` / cursor `--trust --sandbox enabled` / grok `--sandbox workspace` / antigravity `--mode accept-edits --sandbox` / gemini `--approval-mode auto_edit` / правила разрешений раннера для OpenCode и Command Code / MCode `--permission smart`, который не останавливает запуск, если отклоняет вызов инструмента / стандартные инструменты Pi)
+- `yolo`: отключает все подтверждения и песочницу; используйте только для задач и окружений, которым доверяете.
 
 У субагентов нет стандартного ввода, поэтому раннер запускает бэкенды в неинтерактивном режиме. Режимы доступа в разных CLI не полностью эквивалентны, а гарантии изоляции зависят от конкретного инструмента. Например, песочница Cursor выполняет поддерживаемые команды оболочки в изолированной среде, а `--mode plan` задаёт режим только для чтения.
 
@@ -409,7 +409,15 @@ permission: safe-edit
 <details>
 <summary>MiniMax Code</summary>
 
-Установите MiniMax Code и войдите командой `mcode login` или настройте провайдера. Раннер использует `mcode exec --output-format json`. Укажите `run-agent: mcode`; поля `model` и `effort` необязательны. MCode сопоставляет `read-only` и `safe-edit` с `--permission smart`, а `yolo` с `--permission full`. Режим `smart` не останавливает headless-запуск, когда он отклоняет запрос к инструменту, требующий подтверждения. В тесте владельца он запретил запись за пределами рабочей области. Модель перешла в родительский каталог с помощью `cd ..`, повторила запись с относительным путём, и раннер сообщил `succeeded`.
+Установите MiniMax Code и войдите командой `mcode login` или настройте
+провайдера. Укажите `run-agent: mcode`; поля `model` и `effort` необязательны.
+
+В headless-режиме у MCode нет настройки, запрещающей прямое редактирование,
+поэтому `read-only` и `safe-edit` работают с `--permission smart`, а `yolo`
+работает с `--permission full`. Если `smart` отклоняет вызов инструмента,
+требующий подтверждения, запуск продолжается и всё равно может завершиться
+со статусом `success`. В тестах модель повторила отклонённую запись за
+пределами рабочей области через `cd ..` и относительный путь.
 
 </details>
 
@@ -417,7 +425,14 @@ permission: safe-edit
 <details>
 <summary>Pi</summary>
 
-Установите Pi и настройте провайдера и модель. Раннер использует `pi --mode json --print`. Укажите `run-agent: pi`; поля `model` и `effort` необязательны. В режиме `read-only` раннер разрешает только `read`, `grep`, `find` и `ls`, а также исключает MCP-инструменты. У Pi нет отдельных режимов разрешений для `safe-edit` и `yolo`.
+Установите Pi и настройте провайдера и модель. Укажите `run-agent: pi`; поля
+`model` и `effort` необязательны. Значение `effort` раннер передаёт в Pi как
+уровень `--thinking`.
+
+В Pi нет режимов разрешений и песочницы. Для `read-only` раннер включает только
+инструменты `read`, `grep`, `find` и `ls`, поэтому агент не может запускать
+shell-команды и MCP-инструменты. `safe-edit` и `yolo` работают со
+стандартными инструментами Pi, включая `bash`, `edit` и `write`.
 
 </details>
 
@@ -492,10 +507,11 @@ skills/sub-agents/
 Установите Command Code и настройте модель. Проверьте аутентификацию командой `command-code status`.
 
 **MiniMax Code:**
-Установите MiniMax Code и войдите командой `mcode login` или настройте провайдера.
+Выполните `mcode login` или настройте провайдера со своим API-ключом.
 
 **Pi:**
-Установите Pi и настройте провайдера и модель.
+Перед использованием бэкенда проверьте учётные данные провайдера командой
+`pi auth check --model <provider/model>`.
 
 ### Агент не найден
 

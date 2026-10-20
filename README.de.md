@@ -224,9 +224,9 @@ Beschreibe seinen Zweck in einem Satz.
 
 **Berechtigungsstufen:**
 
-- `read-only`: Untersuchungs- und Reviewmodus, der direkte Bearbeitungen verhindert, sofern das Backend dies unterstützt; das Shell-Verhalten hängt vom Backend ab und dieser Modus ist keine Sicherheitsgrenze (codex `-s read-only` / claude `--permission-mode plan` / cursor `--mode plan --sandbox enabled` / grok `--sandbox read-only` / antigravity `--mode plan --sandbox` / gemini `--approval-mode plan` / OpenCode-Berechtigungsregeln / Plan-Modus von Command Code). MCode ordnet `read-only` wie `safe-edit` dem Modus `--permission smart` zu. Dieser Modus verhindert keine direkten Bearbeitungen. Pi erlaubt nur `read`, `grep`, `find` und `ls` und schließt MCP-Tools aus.
-- `safe-edit`: nicht interaktiver Standardmodus zum Bearbeiten (codex `-s workspace-write` + `approval_policy=never` / claude `--permission-mode acceptEdits` / cursor `--trust --sandbox enabled` / grok `--sandbox workspace` / antigravity `--mode accept-edits --sandbox` / gemini `--approval-mode auto_edit` / Runner-Regeln für OpenCode und Command Code). MCode verwendet `--permission smart`; Pi verwendet die konfigurierten Tools und hat keinen eigenen `safe-edit`-Modus. In einem MCode-Test des Owners verweigerte `smart` einen Schreibzugriff außerhalb des Arbeitsbereichs, aber der Lauf ging weiter. Das Modell wechselte mit `cd ..` in das übergeordnete Verzeichnis und versuchte es mit einem relativen Pfad erneut. Der Runner meldete danach `succeeded`.
-- `yolo`: umgeht alle Bestätigungen und Sandbox-Beschränkungen; verwende diesen Modus nur für vertrauenswürdige Aufgaben und Umgebungen. MCode verwendet `--permission full`; Pi hat keinen eigenen `yolo`-Modus.
+- `read-only`: Untersuchungs- und Reviewmodus, der direkte Bearbeitungen verhindert, sofern das Backend dies unterstützt; das Shell-Verhalten hängt vom Backend ab und dieser Modus ist keine Sicherheitsgrenze (codex `-s read-only` / claude `--permission-mode plan` / cursor `--mode plan --sandbox enabled` / grok `--sandbox read-only` / antigravity `--mode plan --sandbox` / gemini `--approval-mode plan` / OpenCode-Berechtigungsregeln / Plan-Modus von Command Code / MCode `--permission smart`, das direkte Bearbeitungen trotzdem zulässt / Pi `--tools read,grep,find,ls` ohne MCP-Tools)
+- `safe-edit`: nicht interaktiver Standardmodus zum Bearbeiten (codex `-s workspace-write` + `approval_policy=never` / claude `--permission-mode acceptEdits` / cursor `--trust --sandbox enabled` / grok `--sandbox workspace` / antigravity `--mode accept-edits --sandbox` / gemini `--approval-mode auto_edit` / Runner-Regeln für OpenCode und Command Code / MCode `--permission smart`, das den Lauf nicht abbricht, wenn es einen Tool-Aufruf ablehnt / Standard-Tools von Pi)
+- `yolo`: umgeht alle Bestätigungen und Sandbox-Beschränkungen; verwende diesen Modus nur für vertrauenswürdige Aufgaben und Umgebungen.
 
 Subagenten haben keine Standardeingabe. Der Runner startet die Backends deshalb in einem nicht interaktiven Modus. Die Berechtigungsoptionen der verschiedenen CLIs sind nicht gleichwertig; die tatsächliche Isolation hängt vom jeweiligen Tool ab. Bei Cursor führt die Sandbox beispielsweise unterstützte Shell-Befehle isoliert aus, während `--mode plan` den Nur-Lese-Modus vorgibt.
 
@@ -409,7 +409,16 @@ Installiere Command Code und konfiguriere ein Modell. Melde dich für von Comman
 <details>
 <summary>MiniMax Code</summary>
 
-Installiere MiniMax Code und melde dich mit `mcode login` an oder konfiguriere einen Anbieter. Der Runner verwendet `mcode exec --output-format json`. Setze `run-agent: mcode`; `model` und `effort` sind optional. MCode ordnet `read-only` und `safe-edit` `--permission smart` zu und `yolo` `--permission full`. `smart` beendet den Headless-Lauf nicht, wenn es einen freigabepflichtigen Tool-Aufruf ablehnt. In einem Test des Owners lehnte `smart` einen Schreibzugriff außerhalb des Arbeitsbereichs ab. Das Modell wechselte mit `cd ..` in das übergeordnete Verzeichnis, versuchte den Zugriff mit einem relativen Pfad erneut und der Runner meldete `succeeded`.
+Installiere MiniMax Code und melde dich mit `mcode login` an oder konfiguriere
+einen Anbieter. Setze `run-agent: mcode`; `model` und `effort` sind optional.
+
+Im Headless-Betrieb hat MCode keine Einstellung, die direkte Bearbeitungen
+unterbindet. Deshalb laufen `read-only` und `safe-edit` beide mit
+`--permission smart` und `yolo` mit `--permission full`. Lehnt `smart` einen
+freigabepflichtigen Tool-Aufruf ab, arbeitet das Modell weiter, und der Lauf
+kann trotzdem mit `success` enden. Im Test versuchte das Modell einen
+abgelehnten Schreibzugriff außerhalb des Arbeitsbereichs erneut, diesmal mit
+`cd ..` und einem relativen Pfad.
 
 </details>
 
@@ -417,7 +426,15 @@ Installiere MiniMax Code und melde dich mit `mcode login` an oder konfiguriere e
 <details>
 <summary>Pi</summary>
 
-Installiere Pi und konfiguriere einen Anbieter und ein Modell. Der Runner verwendet `pi --mode json --print`. Setze `run-agent: pi`; `model` und `effort` sind optional. Im Modus `read-only` erlaubt der Runner nur `read`, `grep`, `find` und `ls` und schließt MCP-Tools aus. Pi hat keine eigenen Berechtigungsmodi für `safe-edit` und `yolo`.
+Installiere Pi und konfiguriere einen Anbieter und ein Modell. Setze
+`run-agent: pi`; `model` und `effort` sind optional. `effort` übergibt der
+Runner als `--thinking`-Stufe an Pi.
+
+Pi kennt weder Berechtigungsmodi noch eine Sandbox. Für `read-only` aktiviert
+der Runner nur die Tools `read`, `grep`, `find` und `ls`. Shell-Befehle und
+MCP-Tools stehen dem Agenten dann nicht zur Verfügung. `safe-edit` und `yolo`
+laufen beide mit den Standard-Tools von Pi, darunter `bash`, `edit` und
+`write`.
 
 </details>
 
@@ -492,10 +509,11 @@ Installiere OpenCode und konfiguriere einen Anbieter sowie ein Standardmodell. F
 Installiere Command Code und konfiguriere ein Modell. Prüfe die Authentifizierung mit `command-code status`.
 
 **MiniMax Code:**
-Installiere MiniMax Code und melde dich mit `mcode login` an oder konfiguriere einen Anbieter.
+Führe `mcode login` aus oder konfiguriere einen Anbieter mit eigenem API-Schlüssel.
 
 **Pi:**
-Installiere Pi und konfiguriere einen Anbieter und ein Modell.
+Prüfe vor der Nutzung die Zugangsdaten des Anbieters mit
+`pi auth check --model <provider/model>`.
 
 ### Agent nicht gefunden
 

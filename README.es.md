@@ -224,9 +224,9 @@ Describe su propósito en una frase.
 
 **Niveles de permisos:**
 
-- `read-only`: modo de investigación y revisión que impide las ediciones directas cuando el backend lo admite; el comportamiento del shell depende del backend y este modo no es un límite de seguridad (codex `-s read-only` / claude `--permission-mode plan` / cursor `--mode plan --sandbox enabled` / grok `--sandbox read-only` / antigravity `--mode plan --sandbox` / gemini `--approval-mode plan` / reglas de permisos de OpenCode / modo plan de Command Code). MCode asigna `read-only` a `--permission smart`, igual que `safe-edit`, por lo que no impide las ediciones directas. Pi permite `read`, `grep`, `find` y `ls`, y excluye las herramientas MCP.
-- `safe-edit`: modo de edición no interactivo predeterminado (codex `-s workspace-write` + `approval_policy=never` / claude `--permission-mode acceptEdits` / cursor `--trust --sandbox enabled` / grok `--sandbox workspace` / antigravity `--mode accept-edits --sandbox` / gemini `--approval-mode auto_edit` / reglas del runner para OpenCode y Command Code). MCode usa `--permission smart`; Pi usa las herramientas configuradas y no tiene un modo `safe-edit` propio. En una prueba del propietario, `smart` denegó una escritura fuera del espacio de trabajo, pero la ejecución continuó. El modelo cambió al directorio superior con `cd ..`, volvió a intentarlo con una ruta relativa y el runner informó `succeeded`.
-- `yolo`: omite todas las aprobaciones y el aislamiento; úsalo únicamente con tareas y entornos de confianza. MCode usa `--permission full`; Pi no tiene un modo `yolo` propio.
+- `read-only`: modo de investigación y revisión que impide las ediciones directas cuando el backend lo admite; el comportamiento del shell depende del backend y este modo no es un límite de seguridad (codex `-s read-only` / claude `--permission-mode plan` / cursor `--mode plan --sandbox enabled` / grok `--sandbox read-only` / antigravity `--mode plan --sandbox` / gemini `--approval-mode plan` / reglas de permisos de OpenCode / modo plan de Command Code / MCode `--permission smart`, que sigue permitiendo ediciones directas / Pi `--tools read,grep,find,ls` sin herramientas MCP)
+- `safe-edit`: modo de edición no interactivo predeterminado (codex `-s workspace-write` + `approval_policy=never` / claude `--permission-mode acceptEdits` / cursor `--trust --sandbox enabled` / grok `--sandbox workspace` / antigravity `--mode accept-edits --sandbox` / gemini `--approval-mode auto_edit` / reglas del runner para OpenCode y Command Code / MCode `--permission smart`, que no detiene la ejecución cuando deniega una llamada a una herramienta / herramientas predeterminadas de Pi)
+- `yolo`: omite todas las aprobaciones y el aislamiento; úsalo únicamente con tareas y entornos de confianza.
 
 Los subagentes no tienen entrada estándar, por lo que el runner usa los modos no interactivos de cada backend. Las opciones de permisos de las distintas CLI no son equivalentes; el aislamiento real depende de cada herramienta. Por ejemplo, el sandbox de Cursor ejecuta los comandos de shell compatibles dentro de un entorno aislado, mientras que `--mode plan` establece la restricción de solo lectura.
 
@@ -409,7 +409,16 @@ Instala Command Code y configura un modelo. Usa `command-code login` para los mo
 <details>
 <summary>MiniMax Code</summary>
 
-Instala MiniMax Code e inicia sesión con `mcode login` o configura un proveedor. El runner usa `mcode exec --output-format json`. Define `run-agent: mcode`; `model` y `effort` son opcionales. MCode asigna `read-only` y `safe-edit` a `--permission smart`, y `yolo` a `--permission full`. El modo `smart` no detiene la ejecución headless cuando deniega una llamada de herramienta que requiere aprobación. En una prueba del propietario, denegó una escritura fuera del espacio de trabajo. El modelo cambió al directorio superior con `cd ..`, volvió a intentarlo con una ruta relativa y el runner informó `succeeded`.
+Instala MiniMax Code e inicia sesión con `mcode login`, o configura un
+proveedor. Define `run-agent: mcode`; `model` y `effort` son opcionales.
+
+En modo headless, MCode no tiene ninguna opción que bloquee las ediciones
+directas, así que `read-only` y `safe-edit` usan `--permission smart`, y
+`yolo` usa `--permission full`. Cuando `smart` deniega una llamada a una
+herramienta que requiere aprobación, la ejecución sigue y puede terminar
+igualmente con `success`. En las pruebas, el modelo volvió a intentar una
+escritura denegada fuera del espacio de trabajo con `cd ..` y una ruta
+relativa.
 
 </details>
 
@@ -417,7 +426,15 @@ Instala MiniMax Code e inicia sesión con `mcode login` o configura un proveedor
 <details>
 <summary>Pi</summary>
 
-Instala Pi y configura un proveedor y un modelo. El runner usa `pi --mode json --print`. Define `run-agent: pi`; `model` y `effort` son opcionales. En modo `read-only`, el runner permite `read`, `grep`, `find` y `ls`, y excluye las herramientas MCP. Pi no tiene modos de permiso propios para `safe-edit` y `yolo`.
+Instala Pi y configura un proveedor y un modelo. Define `run-agent: pi`;
+`model` y `effort` son opcionales. El runner pasa `effort` como nivel
+`--thinking` de Pi.
+
+Pi no tiene modos de permisos ni aislamiento. Con `read-only`, el runner
+habilita solo las herramientas `read`, `grep`, `find` y `ls`, así que el agente
+no puede ejecutar comandos de shell ni herramientas MCP. `safe-edit` y `yolo`
+usan las herramientas predeterminadas de Pi, entre ellas `bash`, `edit` y
+`write`.
 
 </details>
 
@@ -492,10 +509,11 @@ Instala OpenCode y configura un proveedor y un modelo predeterminado. Antes de u
 Instala Command Code y configura un modelo. Comprueba la autenticación con `command-code status`.
 
 **MiniMax Code:**
-Instala MiniMax Code e inicia sesión con `mcode login` o configura un proveedor.
+Ejecuta `mcode login` o configura un proveedor con tu propia clave de API.
 
 **Pi:**
-Instala Pi y configura un proveedor y un modelo.
+Antes de usar el backend, comprueba las credenciales del proveedor con
+`pi auth check --model <provider/model>`.
 
 ### No se encuentra el agente
 

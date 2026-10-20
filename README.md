@@ -225,9 +225,9 @@ field.
 
 **Permission levels:**
 
-- `read-only`: investigation/review mode that prevents direct edits where supported; shell behavior depends on the backend and this mode is not a security boundary (codex `-s read-only` / claude `--permission-mode plan` / cursor `--mode plan --sandbox enabled` / grok `--sandbox read-only` / antigravity `--mode plan --sandbox` / gemini `--approval-mode plan` / OpenCode permission rules / Command Code `--permission-mode plan`). MCode maps this level to `--permission smart`, the same as `safe-edit`, so it does not prevent direct edits. Pi allows `read`, `grep`, `find`, and `ls`, and excludes MCP tools.
-- `safe-edit`: default non-interactive edit mode (codex `-s workspace-write` + `approval_policy=never` / claude `--permission-mode acceptEdits` / cursor `--trust --sandbox enabled` / grok `--sandbox workspace` / antigravity `--mode accept-edits --sandbox` / gemini `--approval-mode auto_edit` / OpenCode permission rules / Command Code `--yolo --permission-mode auto-accept`). MCode uses `--permission smart`; Pi uses its configured tools and has no separate `safe-edit` mode. In the owner's MCode test, `smart` denied a write outside the workspace but the run continued. The model changed to the parent directory with `cd ..`, retried with a relative path, and the runner reported `succeeded`.
-- `yolo`: bypass all approvals and sandboxing; use it only for tasks and environments you trust. MCode uses `--permission full`; Pi has no separate `yolo` mode.
+- `read-only`: investigation/review mode that prevents direct edits where supported; shell behavior depends on the backend and this mode is not a security boundary (codex `-s read-only` / claude `--permission-mode plan` / cursor `--mode plan --sandbox enabled` / grok `--sandbox read-only` / antigravity `--mode plan --sandbox` / gemini `--approval-mode plan` / OpenCode permission rules / Command Code `--permission-mode plan` / MCode `--permission smart`, which still allows direct edits / Pi `--tools read,grep,find,ls` with MCP tools excluded)
+- `safe-edit`: default non-interactive edit mode (codex `-s workspace-write` + `approval_policy=never` / claude `--permission-mode acceptEdits` / cursor `--trust --sandbox enabled` / grok `--sandbox workspace` / antigravity `--mode accept-edits --sandbox` / gemini `--approval-mode auto_edit` / OpenCode permission rules / Command Code `--yolo --permission-mode auto-accept` / MCode `--permission smart`, which does not stop the run when it denies a tool call / Pi default tools)
+- `yolo`: bypass all approvals and sandboxing; use it only for tasks and environments you trust.
 
 Sub-agents have no stdin, so the runner uses non-interactive backend modes. The
 isolation guarantees depend on the selected CLI; permission flags are not
@@ -427,7 +427,14 @@ Set `run-agent: command-code`; `model` and `effort` are optional.
 <details>
 <summary>MiniMax Code</summary>
 
-Install MiniMax Code and sign in with `mcode login` or configure a provider. The runner uses `mcode exec --output-format json`. Set `run-agent: mcode`; `model` and `effort` are optional. MCode maps `read-only` and `safe-edit` to `--permission smart`, and maps `yolo` to `--permission full`. The `smart` mode does not stop the headless run when it denies a tool call that needs approval. In the owner's test, it denied a write outside the workspace. The model changed to the parent directory with `cd ..`, retried with a relative path, and the runner reported `succeeded`.
+Install MiniMax Code, then sign in with `mcode login` or configure a provider.
+Set `run-agent: mcode`; `model` and `effort` are optional.
+
+MCode's headless mode has no setting that blocks direct edits, so `read-only`
+and `safe-edit` both run with `--permission smart`, and `yolo` runs with
+`--permission full`. When `smart` denies a tool call that needs approval, the
+run keeps going and can still end with `success`. In testing, the model
+retried a denied write outside the workspace with `cd ..` and a relative path.
 
 </details>
 
@@ -435,7 +442,14 @@ Install MiniMax Code and sign in with `mcode login` or configure a provider. The
 <details>
 <summary>Pi</summary>
 
-Install Pi and configure a provider and model. The runner uses `pi --mode json --print`. Set `run-agent: pi`; `model` and `effort` are optional. For `read-only`, the runner allows `read`, `grep`, `find`, and `ls` and excludes MCP tools. Pi has no separate permission modes for `safe-edit` and `yolo`.
+Install Pi and configure a provider and model. Set `run-agent: pi`; `model`
+and `effort` are optional. The runner passes `effort` as Pi's `--thinking`
+level.
+
+Pi has no permission modes or sandbox. For `read-only`, the runner enables
+only the `read`, `grep`, `find`, and `ls` tools, so the agent cannot run shell
+commands or MCP tools. `safe-edit` and `yolo` both run with Pi's default
+tools, including `bash`, `edit`, and `write`.
 
 </details>
 
@@ -519,10 +533,11 @@ Install Command Code and configure a model. Run `command-code status` to check
 authentication before using the backend.
 
 **MiniMax Code:**
-Install MiniMax Code and sign in with `mcode login` or configure a provider.
+Run `mcode login`, or configure a provider for your own API key.
 
 **Pi:**
-Install Pi and configure a provider and model.
+Run `pi auth check --model <provider/model>` to check the provider's
+credentials before using the backend.
 
 ### Agent not found
 
