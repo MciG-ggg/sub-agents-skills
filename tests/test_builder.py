@@ -66,6 +66,19 @@ class TestBuildCommand:
             set(spec.permissions) == set(PERMISSION_VALUES) for spec in _BACKEND_SPECS.values()
         )
 
+    def test_mcode_and_pi_use_headless_commands(self) -> None:
+        # BUILD
+        expected = {
+            "mcode": ("mcode", ["exec", "Task"]),
+            "pi": ("pi", ["--no-session", "--print", "Task"]),
+        }
+
+        # OPERATE
+        actual = {cli: build_command(cli, "Task") for cli in expected}
+
+        # CHECK
+        assert actual == expected
+
     def test_unknown_cli_raises_error(self) -> None:
         with pytest.raises(ValueError, match="Unsupported CLI"):
             build_command("unknown-cli", "test prompt")
@@ -87,6 +100,8 @@ class TestBuildInvocationArgs:
             ("antigravity", "gemini-3.7-flash-high"),
             ("opencode", "test-provider/test-model"),
             ("command-code", "claude-sonnet-4-6"),
+            ("mcode", "provider/model"),
+            ("pi", "provider/model"),
         ],
     )
     def test_model_is_forwarded_to_every_backend(self, cli: str, model: str) -> None:
@@ -115,6 +130,8 @@ class TestBuildInvocationArgs:
             ("antigravity", "high", ("--effort", "high")),
             ("opencode", "vendor-level", ("--variant", "vendor-level")),
             ("command-code", "high", ("--effort", "high")),
+            ("mcode", "high", ("--effort", "high")),
+            ("pi", "high", ("--thinking", "high")),
         ],
     )
     def test_effort_is_forwarded_without_value_validation(
@@ -139,6 +156,64 @@ class TestBuildInvocationArgs:
     def test_unsupported_effort_fails_instead_of_being_ignored(self, cli: str) -> None:
         with pytest.raises(ValueError, match=rf"selected backend: '{cli}'"):
             build_invocation_args(_inv(cli, effort="high"))
+
+    def test_mcode_arguments_include_model_effort_and_system_context(self) -> None:
+        # BUILD
+        invocation = _inv("mcode", model="provider/model", effort="high")
+
+        # OPERATE
+        process = build_invocation_args(invocation)
+
+        # CHECK
+        assert process.command == "mcode"
+        assert process.args == [
+            "exec",
+            "--permission",
+            "smart",
+            "--model",
+            "provider/model",
+            "--effort",
+            "high",
+            "--append-system-prompt",
+            "cwd: /test/cwd\n\nAgent definition",
+            "User task",
+        ]
+
+    def test_mcode_rejects_read_only_permission(self) -> None:
+        # BUILD
+        invocation = _inv("mcode", permission="read-only")
+
+        # OPERATE
+        with pytest.raises(ValueError, match="read-only") as error:
+            build_invocation_args(invocation)
+
+        # CHECK
+        assert error.value.args == ("CLI 'mcode' does not support permission 'read-only'.",)
+
+    def test_pi_arguments_include_read_only_tools_and_model_effort(self) -> None:
+        # BUILD
+        invocation = _inv("pi", model="provider/model", effort="high", permission="read-only")
+
+        # OPERATE
+        process = build_invocation_args(invocation)
+
+        # CHECK
+        assert process.command == "pi"
+        assert process.args == [
+            "--tools",
+            "read,grep,find,ls",
+            "--exclude-tools",
+            "mcp__*",
+            "--model",
+            "provider/model",
+            "--thinking",
+            "high",
+            "--append-system-prompt",
+            "cwd: /test/cwd\n\nAgent definition",
+            "--no-session",
+            "--print",
+            "User task",
+        ]
 
     def test_codex_effort_is_safely_encoded_as_toml_string(self) -> None:
         assert effort_flags("codex", 'high" -c unsafe=true') == [

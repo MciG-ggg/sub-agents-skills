@@ -13,6 +13,19 @@ class TestStreamProcessor:
     def test_supported_clis_have_line_processors(self) -> None:
         assert set(_LINE_PROCESSORS) == set(SUPPORTED_CLIS)
 
+    @pytest.mark.parametrize("cli", ["mcode", "pi"])
+    def test_plain_text_backend_does_not_parse_json_looking_output(self, cli: str) -> None:
+        # BUILD
+        processor = StreamProcessor(cli)
+        output = '{"type":"result","result":"agent text"}'
+
+        # OPERATE
+        terminal = processor.process_line(output)
+
+        # CHECK
+        assert terminal is False
+        assert processor.get_result() is None
+
     @pytest.mark.parametrize("cli", ["claude", "glm", "kimi"])
     def test_claude_family_result(self, cli: str) -> None:
         processor = StreamProcessor(cli)
